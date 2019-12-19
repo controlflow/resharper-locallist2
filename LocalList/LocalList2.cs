@@ -412,7 +412,7 @@ namespace JetBrains.Util
 
     public void InsertRange(int index, in LocalList2<T> items)
     {
-      InsertRange(index, items.myArray, items.myCount);
+      InsertRange(index, LocalList2<T>.myArray, LocalList2<T>.myCount);
     }
 
     public void InsertRange<TSource>(int atIndex, [NotNull] TSource[] items, int startingFrom = 0, int length = -1)
