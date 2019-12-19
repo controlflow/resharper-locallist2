@@ -306,8 +306,13 @@ namespace JetBrains.Util.DataStructures.Collections
 
         switch ((myCountAndIterationData += VersionAndCountIncrement) & ~IteratorOrVersionMask)
         {
-          case FrozenCount + 1: myItem0 = value; break;
-          default: self = new ListOf4<T>(myItem0, value); break;
+          case FrozenCount + 1:
+            myItem0 = value;
+            break;
+
+          default:
+            self = new ListOf4<T>(myItem0, value);
+            break;
         }
       }
 

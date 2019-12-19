@@ -17,6 +17,7 @@ namespace JetBrains.Util
   [StructLayout(LayoutKind.Auto)]
   [DebuggerDisplay("Count = {" + nameof(Count) + "}")]
   [DebuggerTypeProxy(typeof(LocalListDebugView<>))]
+  [PublicAPI]
   public struct LocalList<T>
   {
     private const int DefaultFirstSize = 4;
