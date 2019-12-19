@@ -270,7 +270,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public ListOf1() {  }
 
-      public ListOf1([NotNull] ListOf1<T> other)
+      private ListOf1([NotNull] ListOf1<T> other)
       {
         myCountAndIterationData = other.myCountAndIterationData;
         myItem0 = other.myItem0;

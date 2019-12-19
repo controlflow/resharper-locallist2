@@ -32,14 +32,21 @@ namespace JetBrains.Util
     [Obsolete] private static int myNextSize;
     [Obsolete] private static int myVersion;
 
+    public LocalList2(in LocalList2<T> other)
+    {
+      myList = other.myList?.Clone();
+    }
 
     public LocalList2(int capacity, bool forceUseArray = false)
     {
+      if (capacity < 0)
+        throw new ArgumentOutOfRangeException(nameof(capacity));
+
       Debug.Assert(capacity >= 0, "capacity >= 0");
 
       if (forceUseArray && capacity > 0)
       {
-        myList = new FixedList.ListOfArray<T>(new T[capacity], capacity);
+        myList = new FixedList.ListOfArray<T>(new T[capacity], count: 0);
       }
       else
       {
@@ -76,11 +83,6 @@ namespace JetBrains.Util
       {
         myList = new FixedList.ListOfArray<T>(array, array.Length);
       }
-    }
-
-    public LocalList2(in LocalList2<T> other)
-    {
-      myList = other.myList?.Clone();
     }
 
     /// <summary>
