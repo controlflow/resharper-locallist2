@@ -101,7 +101,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       protected bool IsFrozen => (CountAndIterationData & NotFrozenBit) != 0;
 
-      public int Count => (int) ((uint) CountAndIterationData >> CountShift);
+      public int ShortCount => (int) ((uint) CountAndIterationData >> CountShift);
 
       protected const int FrozenBitShift = 16;
       protected const int CountShift = FrozenBitShift + 1;
@@ -141,6 +141,8 @@ namespace JetBrains.Util.DataStructures.Collections
         CountAndIterationData = (int) ((uint) count << CountShift) | ReadyForGetEnumerator; // frozen, count is set
       }
 
+      public virtual int Count => ShortCount;
+
       public abstract int Capacity { get; }
 
       [Pure]
@@ -150,7 +152,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       [NotNull, Pure] public abstract Builder<T> Clone();
 
-      [CanBeNull, Pure] public abstract Builder<T> TrimExcess(bool clone);
+      [CanBeNull] public abstract Builder<T> TrimExcess(bool clone);
 
       protected abstract void CopyToImpl([NotNull] T[] array, int arrayIndex);
 
@@ -166,7 +168,7 @@ namespace JetBrains.Util.DataStructures.Collections
         Debug.Assert(IsFrozen);
 
         var data = CountAndIterationData;
-        var count = data >> CountShift;
+        var count = Count; // virtual call
         var expected = data | ReadyForGetEnumerator;
 
         if (expected == Interlocked.CompareExchange(
@@ -195,7 +197,7 @@ namespace JetBrains.Util.DataStructures.Collections
         public bool MoveNext()
         {
           var nextIndex = myIndex + 1;
-          if (nextIndex < myBuilder.Count)
+          if (nextIndex < myBuilder.ShortCount)
           {
             myIndex = nextIndex;
             return true;
@@ -251,7 +253,7 @@ namespace JetBrains.Util.DataStructures.Collections
           throw new ArgumentNullException(nameof(array));
         if (arrayIndex < 0)
           throw new ArgumentOutOfRangeException(nameof(arrayIndex));
-        if (arrayIndex + Count > array.Length)
+        if (arrayIndex + ShortCount > array.Length)
           throw new ArgumentOutOfRangeException(nameof(arrayIndex));
 
         CopyToImpl(array, arrayIndex);
@@ -285,7 +287,18 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public sealed override string ToString()
       {
-        return $"{nameof(FixedList)}(Count = {Count.ToString()})";
+        return $"{nameof(FixedList)}(Count = {ShortCount.ToString()})";
+      }
+
+      public bool AllFreeSlotsAreClear()
+      {
+        for (int index = Count, capacity = Capacity; index < capacity; index++)
+        {
+          var item = GetItemNoRangeCheck(index);
+          if (!EqualityComparer<T>.Default.Equals(item, default)) return false;
+        }
+
+        return true;
       }
     }
 
@@ -304,14 +317,14 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         get
         {
-          if ((uint) index >= (uint) Count) ThrowOutOfRange();
+          if ((uint) index >= (uint) ShortCount) ThrowOutOfRange();
 
           return Item0;
         }
         set
         {
           if (IsFrozen) ThrowFrozen();
-          if ((uint) index >= Count) ThrowOutOfRange();
+          if ((uint) index >= ShortCount) ThrowOutOfRange();
 
           Item0 = value;
         }
@@ -356,7 +369,7 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         Debug.Assert(!IsFrozen); // mutable operation
 
-        if (Count == 0) return null;
+        if (ShortCount == 0) return null;
 
         return clone ? Clone() : this;
       }
@@ -365,14 +378,14 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override int IndexOf(T item)
       {
-        if (Count == 1 && EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
+        if (ShortCount == 1 && EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
 
         return -1;
       }
 
       protected override void CopyToImpl(T[] array, int arrayIndex)
       {
-        if (Count == 1) array[arrayIndex] = Item0;
+        if (ShortCount == 1) array[arrayIndex] = Item0;
       }
     }
 
@@ -392,14 +405,14 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         get
         {
-          if ((uint) index >= (uint) Count) ThrowOutOfRange();
+          if ((uint) index >= (uint) ShortCount) ThrowOutOfRange();
 
           return index == 0 ? Item0 : Item1;
         }
         set
         {
           if (IsFrozen) ThrowFrozen();
-          if ((uint) index >= Count) ThrowOutOfRange();
+          if ((uint) index >= ShortCount) ThrowOutOfRange();
 
           if (index == 0)
             Item0 = value;
@@ -456,7 +469,7 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         Debug.Assert(!IsFrozen);
 
-        switch (Count)
+        switch (ShortCount)
         {
           case 0: return null;
           case 1: return new ListOf1<T> {CountAndIterationData = NotFrozenCount1, Item0 = Item0};
@@ -475,7 +488,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override int IndexOf(T item)
       {
-        var count = Count;
+        var count = ShortCount;
         if (count > 0)
         {
           if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
@@ -491,7 +504,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       protected override void CopyToImpl(T[] array, int arrayIndex)
       {
-        var count = Count;
+        var count = ShortCount;
         if (count > 0)
         {
           array[arrayIndex++] = Item0;
@@ -521,7 +534,7 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         get
         {
-          if ((uint) index > (uint) Count) ThrowOutOfRange();
+          if ((uint) index > (uint) ShortCount) ThrowOutOfRange();
 
           switch (index)
           {
@@ -533,7 +546,7 @@ namespace JetBrains.Util.DataStructures.Collections
         set
         {
           if (IsFrozen) ThrowFrozen();
-          if ((uint) index >= Count) ThrowOutOfRange();
+          if ((uint) index >= ShortCount) ThrowOutOfRange();
 
           switch (index)
           {
@@ -600,7 +613,7 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         Debug.Assert(!IsFrozen);
 
-        switch (Count)
+        switch (ShortCount)
         {
           case 0:
             return null;
@@ -640,7 +653,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override int IndexOf(T item)
       {
-        var count = Count;
+        var count = ShortCount;
         if (count > 0)
         {
           if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
@@ -661,7 +674,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       protected override void CopyToImpl(T[] array, int arrayIndex)
       {
-        var count = Count;
+        var count = ShortCount;
         if (count > 0)
         {
           array[arrayIndex++] = Item0;
@@ -703,7 +716,7 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         get
         {
-          if ((uint) index > (uint) Count) ThrowOutOfRange();
+          if ((uint) index > (uint) ShortCount) ThrowOutOfRange();
 
           switch (index)
           {
@@ -716,7 +729,7 @@ namespace JetBrains.Util.DataStructures.Collections
         set
         {
           if (IsFrozen) ThrowFrozen();
-          if ((uint) index >= Count) ThrowOutOfRange();
+          if ((uint) index >= ShortCount) ThrowOutOfRange();
 
           GetItemNoRangeCheck(index) = value;
         }
@@ -781,7 +794,7 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         Debug.Assert(!IsFrozen);
 
-        switch (Count)
+        switch (ShortCount)
         {
           case 0:
             return null;
@@ -831,7 +844,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override int IndexOf(T item)
       {
-        var count = Count;
+        var count = ShortCount;
         if (count > 0)
         {
           if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
@@ -857,7 +870,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       protected override void CopyToImpl(T[] array, int arrayIndex)
       {
-        var count = Count;
+        var count = ShortCount;
         if (count > 0)
         {
           array[arrayIndex++] = Item0;
@@ -890,7 +903,7 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         get
         {
-          if ((uint) index > (uint) Count) ThrowOutOfRange();
+          if ((uint) index > (uint) ShortCount) ThrowOutOfRange();
 
           switch (index)
           {
@@ -907,7 +920,7 @@ namespace JetBrains.Util.DataStructures.Collections
         set
         {
           if (IsFrozen) ThrowFrozen();
-          if ((uint) index >= Count) ThrowOutOfRange();
+          if ((uint) index >= ShortCount) ThrowOutOfRange();
 
           GetItemNoRangeCheck(index) = value;
         }
@@ -962,7 +975,7 @@ namespace JetBrains.Util.DataStructures.Collections
         array[6] = Item6;
         array[7] = Item7;
         array[8] = item;
-        return new ListOfArray<T>(array, count: 8);
+        return new ListOfArray<T>(array, count: 9);
       }
 
       public override Builder<T> Clone()
@@ -985,7 +998,7 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         Debug.Assert(!IsFrozen);
 
-        switch (Count)
+        switch (ShortCount)
         {
           case 0:
             return null;
@@ -1055,7 +1068,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override int IndexOf(T item)
       {
-        var count = Count;
+        var count = ShortCount;
         if (count > 0)
         {
           if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
@@ -1101,7 +1114,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       protected override void CopyToImpl(T[] array, int arrayIndex)
       {
-        var count = Count;
+        var count = ShortCount;
         if (count > 0)
         {
           array[arrayIndex++] = Item0;
@@ -1157,9 +1170,7 @@ namespace JetBrains.Util.DataStructures.Collections
         myCount = count;
       }
 
-      [Obsolete("Use 'myCount' instead", error: true)]
-      [UsedImplicitly]
-      public new int Count => -1;
+      public override int Count => myCount;
 
       public override int Capacity => myArray.Length;
 
@@ -1342,7 +1353,7 @@ namespace JetBrains.Util.DataStructures.Collections
     {
       public BuilderDebugView([NotNull] Builder<T> builder)
       {
-        var array = new T[builder.Count];
+        var array = new T[builder.ShortCount];
         builder.CopyTo(array, arrayIndex: 0);
         Items = array;
       }

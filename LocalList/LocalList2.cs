@@ -72,7 +72,7 @@ namespace JetBrains.Util
           case 6:
           case 7:
           case 8: myList = new FixedList.ListOf8<T>(); break;
-          default: myList = new FixedList.ListOfArray<T>(new T[capacity], capacity); break;
+          default: myList = new FixedList.ListOfArray<T>(new T[capacity], count: 0); break;
         }
       }
     }
@@ -129,7 +129,7 @@ namespace JetBrains.Util
 
     [Pure] public bool Any()
     {
-      return myList != null && myList.Count > 0;
+      return myList != null && myList.ShortCount > 0;
     }
 
     [Pure]
@@ -629,6 +629,13 @@ namespace JetBrains.Util
     private static void ThrowManyItems()
     {
       throw new InvalidOperationException("More than single item in LocalList2");
+    }
+
+    public bool AllFreeSlotsAreClear()
+    {
+      if (myList == null) return true;
+
+      return myList.AllFreeSlotsAreClear();
     }
   }
 

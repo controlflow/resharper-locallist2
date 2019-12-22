@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using NUnit.Framework;
+// ReSharper disable RedundantArgumentDefaultValue
+// ReSharper disable ArgumentsStyleLiteral
 
 namespace JetBrains.Util.Tests
 {
@@ -45,15 +47,31 @@ namespace JetBrains.Util.Tests
     {
       foreach (var list in CreateVariousLocalLists())
       {
-        var clone = new LocalList2<int>(in list, preserveCapacity: false);
+        var sameCapacityClone = new LocalList2<int>(in list, preserveCapacity: true);
 
-        Assert.AreEqual(list.Count, clone.Count);
-        Assert.LessOrEqual(clone.Capacity, list.Capacity);
+        Assert.AreEqual(list.Count, sameCapacityClone.Count);
+        Assert.AreEqual(list.Capacity, sameCapacityClone.Capacity);
+        Assert.IsTrue(sameCapacityClone.AllFreeSlotsAreClear());
 
         for (var index = 0; index < list.Count; index++)
         {
-          Assert.AreEqual(list[index], clone[index]);
+          Assert.AreEqual(list[index], sameCapacityClone[index]);
         }
+
+        sameCapacityClone.Add(42);
+        Assert.AreEqual(list.Count + 1, sameCapacityClone.Count);
+        Assert.GreaterOrEqual(sameCapacityClone.Capacity, list.Capacity);
+        Assert.IsTrue(list.AllFreeSlotsAreClear());
+
+        var possibleLessCapacityClone = new LocalList2<int>(in list, preserveCapacity: false);
+
+        Assert.AreEqual(list.Count, possibleLessCapacityClone.Count);
+        Assert.LessOrEqual(possibleLessCapacityClone.Capacity, list.Capacity);
+        Assert.IsTrue(possibleLessCapacityClone.AllFreeSlotsAreClear());
+
+        possibleLessCapacityClone.Add(42);
+        Assert.AreEqual(list.Count + 1, possibleLessCapacityClone.Count);
+        Assert.IsTrue(list.AllFreeSlotsAreClear());
       }
     }
 
