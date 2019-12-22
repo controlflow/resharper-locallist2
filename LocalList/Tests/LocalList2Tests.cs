@@ -45,8 +45,7 @@ namespace JetBrains.Util.Tests
     {
       foreach (var list in CreateVariousLocalLists())
       {
-        // todo: preserveCapacity = true?
-        var clone = new LocalList2<int>(in list);
+        var clone = new LocalList2<int>(in list, preserveCapacity: false);
 
         Assert.AreEqual(list.Count, clone.Count);
         Assert.LessOrEqual(clone.Capacity, list.Capacity);
@@ -71,6 +70,9 @@ namespace JetBrains.Util.Tests
           yield return list;
         }
       }
+
+      // some special cases
+      yield return new LocalList2<int>(capacity: 1, forceUseArray: true);
     }
   }
 }

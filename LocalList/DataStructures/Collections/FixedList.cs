@@ -7,6 +7,10 @@ using JetBrains.Annotations;
 
 namespace JetBrains.Util.DataStructures.Collections
 {
+  // todo: test enumeration/index access speed of T[] vs 8 fields
+  // todo: Count problem!
+
+  [PublicAPI]
   public static class FixedList
   {
     [NotNull, Pure]
@@ -15,15 +19,15 @@ namespace JetBrains.Util.DataStructures.Collections
 
     [NotNull, Pure]
     public static IReadOnlyList<T> Of<T>(T first, T second)
-      => new ListOf2<T>(first, second);
+      => new ListOf2<T>(in first, in second);
 
     [NotNull, Pure]
     public static IReadOnlyList<T> Of<T>(T first, T second, T third)
-      => new ListOf3<T>(first, second, third);
+      => new ListOf3<T>(in first, in second, in third);
 
     [NotNull, Pure]
     public static IReadOnlyList<T> Of<T>(T first, T second, T third, T fourth)
-      => new ListOf4<T>(first, second, third, fourth);
+      => new ListOf4<T>(in first, in second, in third, fourth);
 
     [NotNull, ItemNotNull, Pure]
     public static IReadOnlyList<T> OfNotNull<T>([CanBeNull] T first)
@@ -80,41 +84,53 @@ namespace JetBrains.Util.DataStructures.Collections
       }
     }
 
-    // todo: valuetype mutable enumerator
+    // todo: value-type public mutable enumerator
     [DebuggerTypeProxy(typeof(BuilderDebugView<>))]
     internal abstract class Builder<T> : IReadOnlyList<T>, IEnumerator<T>, IList<T>
     {
-      // ReSharper disable once InconsistentNaming
-      protected int myCountAndIterationData;
+      // [    15 bits    ] [1 bit] [        16 bits        ]
+      //         |            |                |
+      //         |            |                +-- version OR iteration data
+      //         |            |
+      //         |            +-- frozen or not (1 means frozen)
+      //         |
+      //         +-- items count, unsigned
+      //
+      // note: this must be of `int` type to use `Interlocked.CompareExchange()`
+      internal int CountAndIterationData;
 
-      // frozen flag is stored in highest bit
-      protected bool IsFrozen => myCountAndIterationData >= 0;
+      protected bool IsFrozen => (CountAndIterationData & NotFrozenBit) != 0;
 
-      // count is stored in 15 bits (16-30)
-      // todo: can this count only be used for IList<T> impl? to avoid << 1 shift
-      public int Count => (int) ((uint) myCountAndIterationData << 1 >> CountShift + 1);
+      public int Count => (int) ((uint) CountAndIterationData >> CountShift);
 
-      protected const int CountShift = 16;
-      protected const int MaxCount = (int) (uint.MaxValue >> CountShift + 1);
-      protected const int FrozenCount = unchecked((int) (1U << 31));
-      protected const int FrozenCount0 = unchecked((int) (1U << 31));
-      protected const int FrozenCount1 = unchecked((int) (1U << 31 | 1U << CountShift));
-      protected const int FrozenCount2 = unchecked((int) (1U << 31 | 2U << CountShift));
-      protected const int FrozenCount3 = unchecked((int) (1U << 31 | 3U << CountShift));
-      protected const int FrozenCount4 = unchecked((int) (1U << 31 | 4U << CountShift));
+      protected const int FrozenBitShift = 16;
+      protected const int CountShift = FrozenBitShift + 1;
+
+      protected const int NotFrozenBit = 1 << (CountShift - 1);
+
+      protected const int MaxCount = (int) (uint.MaxValue >> CountShift);
+
+      protected const int NotFrozenCount0 = NotFrozenBit;
+      protected const int NotFrozenCount1 = (1 << CountShift) | NotFrozenBit;
+      protected const int NotFrozenCount2 = (2 << CountShift) | NotFrozenBit;
+      protected const int NotFrozenCount3 = (3 << CountShift) | NotFrozenBit;
+      protected const int NotFrozenCount4 = (4 << CountShift) | NotFrozenBit;
+      protected const int NotFrozenCount5 = (5 << CountShift) | NotFrozenBit;
 
       // iterator/version data is stored in first 16 bits
-      // but we include count there as well
-      protected int Version => myCountAndIterationData;
+      // but we include count there as well, because why not
+      // todo: possible store in short?
+      protected int Version => CountAndIterationData;
 
-      protected const int IteratorOrVersionMask = (1 << CountShift) - 1;
+      protected const int IteratorOrVersionMask = (1 << FrozenBitShift) - 1;
       protected const int VersionAndCountIncrement = (1 << CountShift) + 1;
 
+      // todo: clarify
       protected const int ReadyForGetEnumerator = IteratorOrVersionMask;
 
       protected Builder()
       {
-        myCountAndIterationData = int.MinValue; // not frozen, count = 0, version = 0
+        CountAndIterationData = NotFrozenBit; // not frozen, count = 0, version = 0
       }
 
       protected Builder(int count)
@@ -122,7 +138,7 @@ namespace JetBrains.Util.DataStructures.Collections
         Debug.Assert(count > 0); // use 'EmptyList<T>.Instance' instead
         Debug.Assert(count <= MaxCount);
 
-        myCountAndIterationData = count << CountShift | ReadyForGetEnumerator; // frozen, count is set
+        CountAndIterationData = (int) ((uint) count << CountShift) | ReadyForGetEnumerator; // frozen, count is set
       }
 
       public abstract int Capacity { get; }
@@ -130,9 +146,11 @@ namespace JetBrains.Util.DataStructures.Collections
       [Pure]
       public abstract ref T GetItemNoRangeCheck(int index);
 
-      public abstract void Append(in T value, ref Builder<T> self);
+      public abstract void Append(in T newItem, ref Builder<T> self);
 
-      [NotNull] public abstract Builder<T> Clone();
+      [NotNull, Pure] public abstract Builder<T> Clone();
+
+      [CanBeNull, Pure] public abstract Builder<T> TrimExcess(bool clone);
 
       protected abstract void CopyToImpl([NotNull] T[] array, int arrayIndex);
 
@@ -147,12 +165,12 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         Debug.Assert(IsFrozen);
 
-        var data = myCountAndIterationData;
+        var data = CountAndIterationData;
         var count = data >> CountShift;
         var expected = data | ReadyForGetEnumerator;
 
         if (expected == Interlocked.CompareExchange(
-              location1: ref myCountAndIterationData, value: data | count, comparand: expected))
+              location1: ref CountAndIterationData, value: data | count, comparand: expected))
         {
           return this;
         }
@@ -197,22 +215,22 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         Debug.Assert(IsFrozen);
 
-        var newData = myCountAndIterationData - 1;
+        var newData = CountAndIterationData - 1;
         if (newData < 0) return false;
 
-        myCountAndIterationData = newData;
+        CountAndIterationData = newData;
         return true;
       }
 
       void IDisposable.Dispose()
       {
         Interlocked.Exchange(
-          ref myCountAndIterationData, value: myCountAndIterationData | ReadyForGetEnumerator);
+          ref CountAndIterationData, value: CountAndIterationData | ReadyForGetEnumerator);
       }
 
       void IEnumerator.Reset()
       {
-        myCountAndIterationData |= ~IteratorOrVersionMask;
+        CountAndIterationData |= ~IteratorOrVersionMask;
       }
 
       public abstract T Current { get; }
@@ -221,12 +239,9 @@ namespace JetBrains.Util.DataStructures.Collections
       #endregion
       #region Read access
 
-      public virtual T this[int index]
-      {
-        get => throw new InvalidOperationException("Must be overriden");
-        set => throw new CollectionReadOnlyException();
-      }
+      public abstract T this[int index] { get; set; }
 
+      // todo: make use of .Count in both of those methods
       public abstract int IndexOf(T item);
       public bool Contains(T item) => IndexOf(item) >= 0;
 
@@ -255,114 +270,141 @@ namespace JetBrains.Util.DataStructures.Collections
 
       #endregion
 
+      [ContractAnnotation("=> halt")]
       protected static void ThrowOutOfRange()
       {
         // ReSharper disable once NotResolvedInText
         throw new ArgumentOutOfRangeException("index", "Index should be non-negative and less than Count");
       }
 
-      public sealed override string ToString() => $"{nameof(FixedList)}(Count = {Count.ToString()})";
+      [ContractAnnotation("=> halt")]
+      protected static void ThrowFrozen()
+      {
+        throw new CollectionReadOnlyException();
+      }
+
+      public sealed override string ToString()
+      {
+        return $"{nameof(FixedList)}(Count = {Count.ToString()})";
+      }
     }
 
     internal sealed class ListOf1<T> : Builder<T>
     {
-      private T myItem0;
+      internal T Item0;
 
-      public ListOf1() {  }
+      public ListOf1() { }
 
-      private ListOf1([NotNull] ListOf1<T> other)
+      public ListOf1(in T item0) : base(count: 1)
       {
-        myCountAndIterationData = other.myCountAndIterationData;
-        myItem0 = other.myItem0;
-      }
-
-      public ListOf1(T item0) : base(count: 1)
-      {
-        myItem0 = item0;
+        Item0 = item0;
       }
 
       public override T this[int index]
       {
         get
         {
-          Debug.Assert(Count == 1);
+          if ((uint) index >= (uint) Count) ThrowOutOfRange();
 
-          if (index != 0) ThrowOutOfRange();
+          return Item0;
+        }
+        set
+        {
+          if (IsFrozen) ThrowFrozen();
+          if ((uint) index >= Count) ThrowOutOfRange();
 
-          return myItem0;
+          Item0 = value;
         }
       }
 
       public override int Capacity => 1;
 
-      public override ref T GetItemNoRangeCheck(int index)
-      {
-        return ref myItem0;
-      }
+      public override ref T GetItemNoRangeCheck(int index) => ref Item0;
 
-      public override void Append(in T value, ref Builder<T> self)
+      public override void Append(in T newItem, ref Builder<T> self)
       {
         Debug.Assert(!IsFrozen);
 
-        switch ((myCountAndIterationData += VersionAndCountIncrement) & ~IteratorOrVersionMask)
+        var newData = CountAndIterationData += VersionAndCountIncrement;
+        if (newData >> CountShift == 1)
         {
-          case FrozenCount + 1:
-            myItem0 = value;
-            break;
-
-          default:
-            self = new ListOf4<T>(myItem0, value);
-            break;
+          Item0 = newItem;
+        }
+        else
+        {
+          self = new ListOf4<T>
+          {
+            CountAndIterationData = NotFrozenCount2,
+            Item0 = Item0,
+            Item2 = newItem
+          };
         }
       }
 
       public override Builder<T> Clone()
       {
-        return new ListOf1<T>(this);
+        Debug.Assert(!IsFrozen); // there should be no need to clone the immutable data
+
+        return new ListOf1<T>
+        {
+          CountAndIterationData = CountAndIterationData,
+          Item0 = Item0
+        };
       }
 
-      public override T Current => myItem0;
+      public override Builder<T> TrimExcess(bool clone)
+      {
+        Debug.Assert(!IsFrozen); // mutable operation
+
+        if (Count == 0) return null;
+
+        return clone ? Clone() : this;
+      }
+
+      public override T Current => Item0;
 
       public override int IndexOf(T item)
       {
-        if (EqualityComparer<T>.Default.Equals(item, myItem0)) return 0;
+        if (Count == 1 && EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
 
         return -1;
       }
 
       protected override void CopyToImpl(T[] array, int arrayIndex)
       {
-        array[arrayIndex] = myItem0;
+        if (Count == 1) array[arrayIndex] = Item0;
       }
     }
 
     internal sealed class ListOf2<T> : Builder<T>
     {
-      private T myItem0, myItem1;
+      internal T Item0, Item1;
 
       public ListOf2() { }
 
-      public ListOf2([NotNull] ListOf2<T> other)
+      public ListOf2(in T item0, in T item1) : base(count: 2)
       {
-        myCountAndIterationData = other.myCountAndIterationData;
-        myItem0 = other.myItem0;
-        myItem1 = other.myItem1;
-      }
-
-      public ListOf2(T item0, T item1) : base(count: 2)
-      {
-        myItem0 = item0;
-        myItem1 = item1;
+        Item0 = item0;
+        Item1 = item1;
       }
 
       public override T this[int index]
       {
         get
         {
-          // todo: count
-          if ((uint) index > 1u) ThrowOutOfRange();
+          if ((uint) index >= (uint) Count) ThrowOutOfRange();
 
-          return index == 0 ? myItem0 : myItem1;
+          return index == 0 ? Item0 : Item1;
+        }
+        set
+        {
+          if (IsFrozen) ThrowFrozen();
+          if ((uint) index >= Count) ThrowOutOfRange();
+
+          if (index == 0)
+            Item0 = value;
+          else
+            Item1 = value;
         }
       }
 
@@ -370,86 +412,134 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override ref T GetItemNoRangeCheck(int index)
       {
-        if (index == 0)
-          return ref myItem0;
-
-        return ref myItem1;
+        return ref index == 0 ? ref Item0 : ref Item1;
       }
 
-      public override void Append(in T value, ref Builder<T> self)
+      public override void Append(in T newItem, ref Builder<T> self)
       {
         Debug.Assert(!IsFrozen);
 
-        switch ((myCountAndIterationData += VersionAndCountIncrement) & ~IteratorOrVersionMask)
+        var newData = CountAndIterationData += VersionAndCountIncrement;
+
+        switch (newData >> CountShift)
         {
-          case FrozenCount1: myItem0 = value; break;
-          case FrozenCount2: myItem1 = value; break;
-          default: self = new ListOf4<T>(myItem0, myItem1, value); break;
+          case 1: Item0 = newItem; break;
+          case 2: Item1 = newItem; break;
+          default: self = Resize(newItem); break;
         }
+      }
+
+      private Builder<T> Resize(in T newItem)
+      {
+        return new ListOf4<T>
+        {
+          CountAndIterationData = NotFrozenCount3,
+          Item0 = Item0,
+          Item1 = Item1,
+          Item2 = newItem
+        };
       }
 
       public override Builder<T> Clone()
       {
-        return new ListOf2<T>(this);
+        Debug.Assert(!IsFrozen);
+
+        return new ListOf2<T>
+        {
+          CountAndIterationData = CountAndIterationData,
+          Item0 = Item0,
+          Item1 = Item1
+        };
+      }
+
+      public override Builder<T> TrimExcess(bool clone)
+      {
+        Debug.Assert(!IsFrozen);
+
+        switch (Count)
+        {
+          case 0: return null;
+          case 1: return new ListOf1<T> {CountAndIterationData = NotFrozenCount1, Item0 = Item0};
+          default: return clone ? Clone() : this;
+        }
       }
 
       public override T Current
       {
         get
         {
-          var index = myCountAndIterationData | IteratorOrVersionMask;
-          return index == 1 ? myItem1 : myItem0;
+          var index = CountAndIterationData & IteratorOrVersionMask;
+          return index == 0 ? Item0 : Item1;
         }
       }
 
       public override int IndexOf(T item)
       {
-        var comparer = EqualityComparer<T>.Default;
-        if (comparer.Equals(item, myItem0)) return 0;
-        if (comparer.Equals(item, myItem1)) return 1;
+        var count = Count;
+        if (count > 0)
+        {
+          if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
+
+          if (count > 1)
+          {
+            if (EqualityComparer<T>.Default.Equals(item, Item1)) return 1;
+          }
+        }
 
         return -1;
       }
 
       protected override void CopyToImpl(T[] array, int arrayIndex)
       {
-        array[arrayIndex++] = myItem0;
-        array[arrayIndex] = myItem1;
+        var count = Count;
+        if (count > 0)
+        {
+          array[arrayIndex++] = Item0;
+
+          if (count > 1)
+          {
+            array[arrayIndex] = Item1;
+          }
+        }
       }
     }
 
     internal sealed class ListOf3<T> : Builder<T>
     {
-      private T myItem0, myItem1, myItem2;
+      internal T Item0, Item1, Item2;
 
       public ListOf3() { }
 
-      public ListOf3(T item0, T item1, T item2) : base(count: 3)
+      public ListOf3(in T item0, in T item1, in T item2) : base(count: 3)
       {
-        myItem0 = item0;
-        myItem1 = item1;
-        myItem2 = item2;
-      }
-
-      private ListOf3([NotNull] ListOf3<T> other)
-      {
-        myCountAndIterationData = other.myCountAndIterationData;
-        myItem0 = other.myItem0;
-        myItem1 = other.myItem1;
-        myItem2 = other.myItem2;
+        Item0 = item0;
+        Item1 = item1;
+        Item2 = item2;
       }
 
       public override T this[int index]
       {
         get
         {
-          if ((uint) index > 2u) ThrowOutOfRange();
+          if ((uint) index > (uint) Count) ThrowOutOfRange();
 
           switch (index)
           {
-            case 0: return myItem0;
-            case 1: return myItem1;
-            default: return myItem2;
+            case 0: return Item0;
+            case 1: return Item1;
+            default: return Item2;
+          }
+        }
+        set
+        {
+          if (IsFrozen) ThrowFrozen();
+          if ((uint) index >= Count) ThrowOutOfRange();
+
+          switch (index)
+          {
+            case 0: Item0 = value; break;
+            case 1: Item1 = value; break;
+            default: Item2 = value; break;
           }
         }
       }
@@ -460,121 +550,175 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         switch (index)
         {
-          case 0: return ref myItem0;
-          case 1: return ref myItem1;
-          default: return ref myItem2;
+          case 0: return ref Item0;
+          case 1: return ref Item1;
+          default: return ref Item2;
         }
       }
 
-      public override void Append(in T value, ref Builder<T> self)
+      public override void Append(in T newItem, ref Builder<T> self)
       {
         Debug.Assert(!IsFrozen);
 
-        switch ((myCountAndIterationData += VersionAndCountIncrement) & ~IteratorOrVersionMask)
+        var newData = CountAndIterationData += VersionAndCountIncrement;
+
+        switch (newData >> CountShift)
         {
-          case FrozenCount1: myItem0 = value; break;
-          case FrozenCount2: myItem1 = value; break;
-          case FrozenCount3: myItem2 = value; break;
-          default: self = new ListOf8<T>(myItem0, myItem1, myItem2, value); break;
+          case 1: Item0 = newItem; break;
+          case 2: Item1 = newItem; break;
+          case 3: Item2 = newItem; break;
+          default: self = Resize(newItem); break;
         }
+      }
+
+      private Builder<T> Resize(in T newItem)
+      {
+        return new ListOf8<T>
+        {
+          CountAndIterationData = NotFrozenCount4,
+          Item0 = Item0,
+          Item1 = Item1,
+          Item2 = Item2,
+          Item3 = newItem
+        };
       }
 
       public override Builder<T> Clone()
       {
-        return new ListOf3<T>(this);
+        Debug.Assert(!IsFrozen);
+
+        return new ListOf3<T>
+        {
+          CountAndIterationData = CountAndIterationData,
+          Item0 = Item0,
+          Item1 = Item1,
+          Item2 = Item2
+        };
+      }
+
+      public override Builder<T> TrimExcess(bool clone)
+      {
+        Debug.Assert(!IsFrozen);
+
+        switch (Count)
+        {
+          case 0:
+            return null;
+
+          case 1:
+            return new ListOf1<T>
+            {
+              CountAndIterationData = NotFrozenCount1,
+              Item0 = Item0
+            };
+
+          case 2:
+            return new ListOf2<T>
+            {
+              CountAndIterationData = NotFrozenCount2,
+              Item0 = Item0,
+              Item1 = Item1
+            };
+
+          default:
+            return clone ? Clone() : this;
+        }
       }
 
       public override T Current
       {
         get
         {
-          switch (myCountAndIterationData | IteratorOrVersionMask)
+          switch (CountAndIterationData & IteratorOrVersionMask)
           {
-            case 2: return myItem0;
-            case 1: return myItem1;
-            default: return myItem2;
+            case 0: return Item2;
+            case 1: return Item1;
+            default: return Item0;
           }
         }
       }
 
       public override int IndexOf(T item)
       {
-        var comparer = EqualityComparer<T>.Default;
-        if (comparer.Equals(item, myItem0)) return 0;
-        if (comparer.Equals(item, myItem1)) return 1;
-        if (comparer.Equals(item, myItem2)) return 2;
+        var count = Count;
+        if (count > 0)
+        {
+          if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
+
+          if (count > 1)
+          {
+            if (EqualityComparer<T>.Default.Equals(item, Item1)) return 1;
+
+            if (count > 2)
+            {
+              if (EqualityComparer<T>.Default.Equals(item, Item2)) return 2;
+            }
+          }
+        }
 
         return -1;
       }
 
       protected override void CopyToImpl(T[] array, int arrayIndex)
       {
-        array[arrayIndex++] = myItem0;
-        array[arrayIndex++] = myItem1;
-        array[arrayIndex] = myItem2;
+        var count = Count;
+        if (count > 0)
+        {
+          array[arrayIndex++] = Item0;
+
+          if (count > 1)
+          {
+            array[arrayIndex++] = Item1;
+
+            if (count > 2)
+            {
+              array[arrayIndex] = Item2;
+            }
+          }
+        }
       }
     }
 
     internal sealed class ListOf4<T> : Builder<T>
     {
-      private T myItem0, myItem1, myItem2, myItem3;
+      internal T Item0, Item1, Item2, Item3;
 
       public ListOf4() { }
 
-      public ListOf4(in T item0, in T item1)
+      public ListOf4(in T item0)
       {
-        myCountAndIterationData = int.MinValue | (2 << CountShift);
-        myItem0 = item0;
-        myItem1 = item1;
+        CountAndIterationData = NotFrozenCount1;
+        Item0 = item0;
       }
 
-      public ListOf4(in T item0, in T item1, in T item2)
+      public ListOf4(in T item0, in T item1, in T item2, in T item3) : base(count: 4)
       {
-        myCountAndIterationData = int.MinValue | (3 << CountShift);
-        myItem0 = item0;
-        myItem1 = item1;
-        myItem2 = item2;
-      }
-
-      public ListOf4(in T item0, in T item1, in T item2, in T item3)
-      {
-        myCountAndIterationData = int.MinValue | (4 << CountShift);
-        myItem0 = item0;
-        myItem1 = item1;
-        myItem2 = item2;
-        myItem3 = item3;
-      }
-
-      public ListOf4(T item0, T item1, T item2, T item3) : base(count: 4)
-      {
-        myItem0 = item0;
-        myItem1 = item1;
-        myItem2 = item2;
-        myItem3 = item3;
-      }
-
-      private ListOf4([NotNull] ListOf4<T> other)
-      {
-        myCountAndIterationData = other.myCountAndIterationData;
-        myItem0 = other.myItem0;
-        myItem1 = other.myItem1;
-        myItem2 = other.myItem2;
-        myItem3 = other.myItem3;
+        Item0 = item0;
+        Item1 = item1;
+        Item2 = item2;
+        Item3 = item3;
       }
 
       public override T this[int index]
       {
         get
         {
-          if ((uint) index > 3u) ThrowOutOfRange();
+          if ((uint) index > (uint) Count) ThrowOutOfRange();
 
           switch (index)
           {
-            case 0: return myItem0;
-            case 1: return myItem1;
-            case 2: return myItem2;
-            default: return myItem3;
+            case 0: return Item0;
+            case 1: return Item1;
+            case 2: return Item2;
+            default: return Item3;
           }
+        }
+        set
+        {
+          if (IsFrozen) ThrowFrozen();
+          if ((uint) index >= Count) ThrowOutOfRange();
+
+          GetItemNoRangeCheck(index) = value;
         }
       }
 
@@ -584,133 +728,188 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         switch (index)
         {
-          case 0: return ref myItem0;
-          case 1: return ref myItem1;
-          case 2: return ref myItem2;
-          default: return ref myItem3;
+          case 0: return ref Item0;
+          case 1: return ref Item1;
+          case 2: return ref Item2;
+          default: return ref Item3;
         }
       }
 
-      public override void Append(in T value, ref Builder<T> self)
+      public override void Append(in T newItem, ref Builder<T> self)
       {
         Debug.Assert(!IsFrozen);
 
-        switch ((myCountAndIterationData += VersionAndCountIncrement) & ~IteratorOrVersionMask)
+        var newData = CountAndIterationData += VersionAndCountIncrement;
+        switch (newData >> CountShift)
         {
-          case FrozenCount1: myItem0 = value; break;
-          case FrozenCount2: myItem1 = value; break;
-          case FrozenCount3: myItem2 = value; break;
-          case FrozenCount4: myItem3 = value; break;
-          default: self = new ListOf8<T>(myItem0, myItem1, myItem2, myItem3, value); break;
+          case 1: Item0 = newItem; break;
+          case 2: Item1 = newItem; break;
+          case 3: Item2 = newItem; break;
+          case 4: Item3 = newItem; break;
+          default: self = Resize(newItem); break;
         }
+      }
+
+      private Builder<T> Resize(in T newItem)
+      {
+        return new ListOf8<T>
+        {
+          CountAndIterationData = NotFrozenCount5,
+          Item0 = Item0,
+          Item1 = Item1,
+          Item2 = Item2,
+          Item3 = Item3,
+          Item4 = newItem
+        };
       }
 
       public override Builder<T> Clone()
       {
-        return new ListOf4<T>(this);
+        Debug.Assert(!IsFrozen);
+
+        return new ListOf4<T>
+        {
+          CountAndIterationData = CountAndIterationData,
+          Item0 = Item0,
+          Item1 = Item1,
+          Item2 = Item2,
+          Item3 = Item3
+        };
+      }
+
+      public override Builder<T> TrimExcess(bool clone)
+      {
+        Debug.Assert(!IsFrozen);
+
+        switch (Count)
+        {
+          case 0:
+            return null;
+
+          case 1:
+            return new ListOf1<T>
+            {
+              CountAndIterationData = NotFrozenCount1,
+              Item0 = Item0
+            };
+
+          case 2:
+            return new ListOf2<T>
+            {
+              CountAndIterationData = NotFrozenCount2,
+              Item0 = Item0,
+              Item1 = Item1
+            };
+
+          case 3:
+            return new ListOf3<T>
+            {
+              CountAndIterationData = NotFrozenCount3,
+              Item0 = Item0,
+              Item1 = Item1,
+              Item2 = Item2
+            };
+
+          default:
+            return clone ? Clone() : this;
+        }
       }
 
       public override T Current
       {
         get
         {
-          switch (myCountAndIterationData | IteratorOrVersionMask)
+          switch (CountAndIterationData & IteratorOrVersionMask)
           {
-            case 3: return myItem0;
-            case 2: return myItem1;
-            case 1: return myItem2;
-            default: return myItem3;
+            case 3: return Item0;
+            case 2: return Item1;
+            case 1: return Item2;
+            default: return Item3;
           }
         }
       }
 
       public override int IndexOf(T item)
       {
-        var comparer = EqualityComparer<T>.Default;
-        if (comparer.Equals(item, myItem0)) return 0;
-        if (comparer.Equals(item, myItem1)) return 1;
-        if (comparer.Equals(item, myItem2)) return 2;
-        if (comparer.Equals(item, myItem3)) return 3;
+        var count = Count;
+        if (count > 0)
+        {
+          if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
+
+          if (count > 1)
+          {
+            if (EqualityComparer<T>.Default.Equals(item, Item1)) return 1;
+
+            if (count > 2)
+            {
+              if (EqualityComparer<T>.Default.Equals(item, Item2)) return 2;
+
+              if (count > 3)
+              {
+                if (EqualityComparer<T>.Default.Equals(item, Item3)) return 3;
+              }
+            }
+          }
+        }
 
         return -1;
       }
 
       protected override void CopyToImpl(T[] array, int arrayIndex)
       {
-        array[arrayIndex++] = myItem0;
-        array[arrayIndex++] = myItem1;
-        array[arrayIndex++] = myItem2;
-        array[arrayIndex] = myItem3;
+        var count = Count;
+        if (count > 0)
+        {
+          array[arrayIndex++] = Item0;
+
+          if (count > 1)
+          {
+            array[arrayIndex++] = Item1;
+
+            if (count > 2)
+            {
+              array[arrayIndex++] = Item2;
+
+              if (count > 3)
+              {
+                array[arrayIndex] = Item3;
+              }
+            }
+          }
+        }
       }
     }
 
     internal sealed class ListOf8<T> : Builder<T>
     {
-      private T myItem0, myItem1, myItem2, myItem3, myItem4, myItem5, myItem6, myItem7;
-
-      public ListOf8() { }
-
-      public ListOf8(in T item0, in T item1, in T item2, in T item3)
-      {
-        myCountAndIterationData = int.MinValue | (4 << CountShift);
-        myItem0 = item0;
-        myItem1 = item1;
-        myItem2 = item2;
-        myItem3 = item3;
-      }
-
-      public ListOf8(in T item0, in T item1, in T item2, in T item3, in T item4)
-      {
-        myCountAndIterationData = int.MinValue | (5 << CountShift);
-        myItem0 = item0;
-        myItem1 = item1;
-        myItem2 = item2;
-        myItem3 = item3;
-        myItem4 = item4;
-      }
-
-      public ListOf8(T item0, T item1, T item2, T item3, T item4, T item5, T item6, T item7) : base(count: 8)
-      {
-        myItem0 = item0;
-        myItem1 = item1;
-        myItem2 = item2;
-        myItem3 = item3;
-        myItem4 = item4;
-        myItem5 = item5;
-        myItem6 = item6;
-        myItem7 = item7;
-      }
-
-      private ListOf8([NotNull] ListOf8<T> other)
-      {
-        myCountAndIterationData = other.myCountAndIterationData;
-        myItem0 = other.myItem0;
-        myItem1 = other.myItem1;
-        myItem2 = other.myItem2;
-        myItem3 = other.myItem3;
-        myItem4 = other.myItem4;
-        myItem5 = other.myItem5;
-        myItem6 = other.myItem6;
-        myItem7 = other.myItem7;
-      }
+      // ReSharper disable MemberCanBePrivate.Global
+      internal T Item0, Item1, Item2, Item3, Item4, Item5, Item6, Item7;
+      // ReSharper restore MemberCanBePrivate.Global
 
       public override T this[int index]
       {
         get
         {
-          if ((uint) index > 7u) ThrowOutOfRange();
+          if ((uint) index > (uint) Count) ThrowOutOfRange();
 
           switch (index)
           {
-            case 0: return myItem0;
-            case 1: return myItem1;
-            case 2: return myItem2;
-            case 3: return myItem3;
-            case 4: return myItem4;
-            case 5: return myItem5;
-            case 6: return myItem6;
-            default: return myItem7;
+            case 0: return Item0;
+            case 1: return Item1;
+            case 2: return Item2;
+            case 3: return Item3;
+            case 4: return Item4;
+            case 5: return Item5;
+            case 6: return Item6;
+            default: return Item7;
           }
+        }
+        set
+        {
+          if (IsFrozen) ThrowFrozen();
+          if ((uint) index >= Count) ThrowOutOfRange();
+
+          GetItemNoRangeCheck(index) = value;
         }
       }
 
@@ -720,135 +919,333 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         switch (index)
         {
-          case 0: return ref myItem0;
-          case 1: return ref myItem1;
-          case 2: return ref myItem2;
-          case 3: return ref myItem3;
-          case 4: return ref myItem4;
-          case 5: return ref myItem5;
-          case 6: return ref myItem6;
-          default: return ref myItem7;
+          case 0: return ref Item0;
+          case 1: return ref Item1;
+          case 2: return ref Item2;
+          case 3: return ref Item3;
+          case 4: return ref Item4;
+          case 5: return ref Item5;
+          case 6: return ref Item6;
+          default: return ref Item7;
         }
       }
 
-      public override void Append(in T value, ref Builder<T> self)
+      public override void Append(in T newItem, ref Builder<T> self)
       {
         Debug.Assert(!IsFrozen);
 
-        switch ((myCountAndIterationData += VersionAndCountIncrement) & ~IteratorOrVersionMask)
+        var newData = CountAndIterationData += VersionAndCountIncrement;
+
+        switch (newData >> CountShift)
         {
-          case FrozenCount + 1: myItem0 = value; break;
-          case FrozenCount + 2: myItem1 = value; break;
-          case FrozenCount + 3: myItem2 = value; break;
-          case FrozenCount + 4: myItem3 = value; break;
-          case FrozenCount + 5: myItem4 = value; break;
-          case FrozenCount + 6: myItem5 = value; break;
-          case FrozenCount + 7: myItem6 = value; break;
-          case FrozenCount + 8: myItem7 = value; break;
-          default: self = new ListOfArray<T>(myItem0, myItem1, myItem2, myItem3, myItem4, myItem5, myItem6, myItem7, value); break;
+          case 1: Item0 = newItem; break;
+          case 2: Item1 = newItem; break;
+          case 3: Item2 = newItem; break;
+          case 4: Item3 = newItem; break;
+          case 5: Item4 = newItem; break;
+          case 6: Item5 = newItem; break;
+          case 7: Item6 = newItem; break;
+          case 8: Item7 = newItem; break;
+          default: self = Resize(in newItem); break;
         }
+      }
+
+      private Builder<T> Resize(in T item)
+      {
+        var array = new T[16];
+        array[0] = Item0;
+        array[1] = Item1;
+        array[2] = Item2;
+        array[3] = Item3;
+        array[4] = Item4;
+        array[5] = Item5;
+        array[6] = Item6;
+        array[7] = Item7;
+        array[8] = item;
+        return new ListOfArray<T>(array, count: 8);
       }
 
       public override Builder<T> Clone()
       {
-        return new ListOf8<T>(this);
+        return new ListOf8<T>
+        {
+          CountAndIterationData = CountAndIterationData,
+          Item0 = Item0,
+          Item1 = Item1,
+          Item2 = Item2,
+          Item3 = Item3,
+          Item4 = Item4,
+          Item5 = Item5,
+          Item6 = Item6,
+          Item7 = Item7
+        };
+      }
+
+      public override Builder<T> TrimExcess(bool clone)
+      {
+        Debug.Assert(!IsFrozen);
+
+        switch (Count)
+        {
+          case 0:
+            return null;
+
+          case 1:
+            return new ListOf1<T>
+            {
+              CountAndIterationData = NotFrozenCount1,
+              Item0 = Item0
+            };
+
+          case 2:
+            return new ListOf2<T>
+            {
+              CountAndIterationData = NotFrozenCount2,
+              Item0 = Item0,
+              Item1 = Item1
+            };
+
+          case 3:
+            return new ListOf3<T>
+            {
+              CountAndIterationData = NotFrozenCount3,
+              Item0 = Item0,
+              Item1 = Item1,
+              Item2 = Item2
+            };
+
+          case 4:
+            return new ListOf4<T>
+            {
+              CountAndIterationData = NotFrozenCount4,
+              Item0 = Item0,
+              Item1 = Item1,
+              Item2 = Item2,
+              Item3 = Item3
+            };
+
+          // todo: allocate as an array?
+          // case 5:
+          // case 6:
+          // case 7:
+          //   return new ListOfArray<T>();
+
+          default:
+            return clone ? Clone() : this;
+        }
       }
 
       public override T Current
       {
         get
         {
-          switch (myCountAndIterationData | IteratorOrVersionMask)
+          switch (CountAndIterationData & IteratorOrVersionMask)
           {
-            case 7: return myItem0;
-            case 6: return myItem1;
-            case 5: return myItem2;
-            case 4: return myItem3;
-            case 3: return myItem4;
-            case 2: return myItem5;
-            case 1: return myItem6;
-            default: return myItem7;
+            case 7: return Item0;
+            case 6: return Item1;
+            case 5: return Item2;
+            case 4: return Item3;
+            case 3: return Item4;
+            case 2: return Item5;
+            case 1: return Item6;
+            default: return Item7;
           }
         }
       }
 
       public override int IndexOf(T item)
       {
-        var comparer = EqualityComparer<T>.Default;
-        if (comparer.Equals(item, myItem0)) return 0;
-        if (comparer.Equals(item, myItem1)) return 1;
-        if (comparer.Equals(item, myItem2)) return 2;
-        if (comparer.Equals(item, myItem3)) return 3;
-        if (comparer.Equals(item, myItem4)) return 4;
-        if (comparer.Equals(item, myItem5)) return 5;
-        if (comparer.Equals(item, myItem6)) return 6;
-        if (comparer.Equals(item, myItem7)) return 7;
+        var count = Count;
+        if (count > 0)
+        {
+          if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
+
+          if (count > 1)
+          {
+            if (EqualityComparer<T>.Default.Equals(item, Item1)) return 1;
+
+            if (count > 2)
+            {
+              if (EqualityComparer<T>.Default.Equals(item, Item2)) return 2;
+
+              if (count > 3)
+              {
+                if (EqualityComparer<T>.Default.Equals(item, Item3)) return 3;
+
+                if (count > 4)
+                {
+                  if (EqualityComparer<T>.Default.Equals(item, Item4)) return 4;
+
+                  if (count > 5)
+                  {
+                    if (EqualityComparer<T>.Default.Equals(item, Item5)) return 5;
+
+                    if (count > 6)
+                    {
+                      if (EqualityComparer<T>.Default.Equals(item, Item6)) return 6;
+
+                      if (count > 7)
+                      {
+                        if (EqualityComparer<T>.Default.Equals(item, Item7)) return 7;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
 
         return -1;
       }
 
       protected override void CopyToImpl(T[] array, int arrayIndex)
       {
-        array[arrayIndex++] = myItem0;
-        array[arrayIndex++] = myItem1;
-        array[arrayIndex++] = myItem2;
-        array[arrayIndex++] = myItem3;
-        array[arrayIndex++] = myItem4;
-        array[arrayIndex++] = myItem5;
-        array[arrayIndex++] = myItem6;
-        array[arrayIndex] = myItem7;
+        var count = Count;
+        if (count > 0)
+        {
+          array[arrayIndex++] = Item0;
+
+          if (count > 1)
+          {
+            array[arrayIndex++] = Item1;
+
+            if (count > 2)
+            {
+              array[arrayIndex++] = Item2;
+
+              if (count > 3)
+              {
+                array[arrayIndex++] = Item3;
+
+                if (count > 4)
+                {
+                  array[arrayIndex++] = Item4;
+
+                  if (count > 5)
+                  {
+                    array[arrayIndex++] = Item5;
+
+                    if (count > 6)
+                    {
+                      array[arrayIndex++] = Item6;
+
+                      if (count > 7)
+                      {
+                        array[arrayIndex] = Item7;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
 
     internal sealed class ListOfArray<T> : Builder<T>
     {
-      private T[] myArray;
+      [NotNull] private T[] myArray;
       private int myCount; // use this instead of myCountAndVersionData
 
-      public ListOfArray(in T item0, in T item1, in T item2, in T item3, in T item4, in T item5, in T item6, in T item7, in T item8)
+      public ListOfArray([NotNull] T[] array, int count)
       {
-        var array = new T[16];
-        array[0] = item0;
-        array[1] = item1;
-        array[2] = item2;
-        array[3] = item3;
-        array[4] = item4;
-        array[5] = item5;
-        array[6] = item6;
-        array[7] = item7;
-        array[8] = item8;
+        Debug.Assert(array != null);
 
-        myArray = array;
-        myCount = 9;
-      }
-
-      public ListOfArray(T[] array, int count)
-      {
         myArray = array;
         myCount = count;
       }
 
+      [Obsolete("Use 'myCount' instead", error: true)]
+      [UsedImplicitly]
+      public new int Count => -1;
+
       public override int Capacity => myArray.Length;
 
-      public override ref T GetItemNoRangeCheck(int index)
-      {
-        return ref myArray[index];
-      }
+      public override ref T GetItemNoRangeCheck(int index) => ref myArray[index];
 
-      public override void Append(in T value, ref Builder<T> self)
+      public override void Append(in T newItem, ref Builder<T> self)
       {
-        throw new NotImplementedException();
-        // todo: extend arrays
+        if (myCount == myArray.Length)
+        {
+          var newArray = new T[myCount * 2];
+          Array.Copy(myArray, 0, newArray, 0, myCount);
+          myArray = newArray;
+        }
+
+        myArray[myCount++] = newItem;
+        CountAndIterationData++;
       }
 
       public override Builder<T> Clone()
       {
+        Debug.Assert(!IsFrozen);
+
         var newArray = new T[myArray.Length];
         Array.Copy(myArray, newArray, myCount);
         return new ListOfArray<T>(newArray, myCount);
       }
 
-      public override T Current => myArray[myCount - myCountAndIterationData];
+      public override Builder<T> TrimExcess(bool clone)
+      {
+        Debug.Assert(!IsFrozen);
+
+        if (clone && myCount == myArray.Length)
+        {
+          return Clone();
+        }
+
+        switch (myCount)
+        {
+          case 0:
+            return null;
+
+          case 1:
+            return new ListOf1<T>
+            {
+              CountAndIterationData = NotFrozenCount1,
+              Item0 = myArray[0]
+            };
+
+          case 2:
+            return new ListOf2<T>
+            {
+              CountAndIterationData = NotFrozenCount2,
+              Item0 = myArray[0],
+              Item1 = myArray[1]
+            };
+
+          case 3:
+            return new ListOf3<T>
+            {
+              CountAndIterationData = NotFrozenCount3,
+              Item0 = myArray[0],
+              Item1 = myArray[1],
+              Item2 = myArray[2]
+            };
+
+          case 4:
+            return new ListOf4<T>
+            {
+              CountAndIterationData = NotFrozenCount4,
+              Item0 = myArray[0],
+              Item1 = myArray[1],
+              Item2 = myArray[2],
+              Item3 = myArray[3]
+            };
+
+          default:
+            return clone ? Clone() : this;
+        }
+
+
+        var newArray = new T[myArray.Length];
+        Array.Copy(myArray, newArray, myCount);
+        return new ListOfArray<T>(newArray, myCount);
+      }
+
+      public override T Current => myArray[myCount - CountAndIterationData];
 
       public override int IndexOf(T item)
       {
@@ -862,7 +1259,19 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override T this[int index]
       {
-        get => throw new NotImplementedException();
+        get
+        {
+          if ((uint) index >= (uint) myCount) ThrowOutOfRange();
+
+          return myArray[index];
+        }
+        set
+        {
+          if ((uint) index >= (uint) myCount) ThrowOutOfRange();
+          if (IsFrozen) ThrowFrozen();
+
+          myArray[index] = value;
+        }
       }
     }
 
@@ -870,9 +1279,17 @@ namespace JetBrains.Util.DataStructures.Collections
     internal sealed class ListOfRefArray<T> : Builder<T>
       where T : class
     {
-      private struct Element
+      private struct Element : IEquatable<Element>
       {
         public T Value;
+
+        public bool Equals(Element other)
+        {
+          return EqualityComparer<T>.Default.Equals(Value, other.Value);
+        }
+
+        public override bool Equals(object obj) => throw new InvalidOperationException();
+        public override int GetHashCode() => throw new InvalidOperationException();
       }
 
       private Element[] myArray;
@@ -887,12 +1304,17 @@ namespace JetBrains.Util.DataStructures.Collections
         return ref myArray[index].Value;
       }
 
-      public override void Append(in T value, ref Builder<T> self)
+      public override void Append(in T newItem, ref Builder<T> self)
       {
         throw new NotImplementedException();
       }
 
       public override Builder<T> Clone()
+      {
+        throw new NotImplementedException();
+      }
+
+      public override Builder<T> TrimExcess(bool clone)
       {
         throw new NotImplementedException();
       }
@@ -907,11 +1329,12 @@ namespace JetBrains.Util.DataStructures.Collections
         throw new NotImplementedException();
       }
 
-      public override T Current { get; }
+      public override T Current => throw new NotImplementedException();
 
       public override T this[int index]
       {
-        get => throw new NotImplementedException();
+        get { throw new NotImplementedException(); }
+        set { throw new NotImplementedException(); }
       }
     }
 
@@ -924,6 +1347,8 @@ namespace JetBrains.Util.DataStructures.Collections
         Items = array;
       }
 
+      // ReSharper disable once MemberCanBePrivate.Global
+      // ReSharper disable once UnusedAutoPropertyAccessor.Global
       [NotNull] public T[] Items { get; }
     }
   }

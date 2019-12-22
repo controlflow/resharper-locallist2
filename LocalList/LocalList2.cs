@@ -1,15 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using JetBrains.Annotations;
 using JetBrains.Util.DataStructures.Collections;
+// ReSharper disable MergeConditionalExpression
 
 // ReSharper disable once CheckNamespace
 namespace JetBrains.Util
 {
   // NOTE: [downside] may allocate array instead of returning internal one
+  // todo: check with 65636 'byte' items
 
   /// <summary>
   /// Represents collection of items that doesn't create heap objects unless items are added
@@ -32,9 +35,17 @@ namespace JetBrains.Util
     [Obsolete] private static int myNextSize;
     [Obsolete] private static int myVersion;
 
-    public LocalList2(in LocalList2<T> other)
+    public LocalList2(in LocalList2<T> other, bool preserveCapacity = false)
     {
-      myList = other.myList?.Clone();
+      var otherList = other.myList;
+      if (otherList != null)
+      {
+        myList = preserveCapacity ? otherList.Clone() : otherList.TrimExcess(clone: true);
+      }
+      else
+      {
+        myList = null;
+      }
     }
 
     public LocalList2(int capacity, bool forceUseArray = false)
@@ -88,48 +99,38 @@ namespace JetBrains.Util
     /// <summary>
     /// Gets the number of elements contained in the <see cref="LocalList2{T}"/>.
     /// </summary>
-    public int Count
+    public int Count => myList == null ? 0 : myList.Count;
+
+    public int Capacity => myList == null ? 0 : myList.Capacity;
+
+    public void Add(T item)
     {
-      get
-      {
-        if (myList == null) return 0;
-
-        return myList.Count; // virtual call
-      }
-    }
-
-    // ReSharper disable once MergeConditionalExpression
-    public int Capacity
-    {
-      get
-      {
-        if (myList == null) return 0;
-
-        return myList.Capacity;
-      }
+      if (myList == null)
+        myList = new FixedList.ListOf4<T>(in item);
+      else
+        myList.Append(in item, ref myList);
     }
 
     public T this[int index]
     {
       get
       {
+        if (myList == null) ThrowOutOfRange();
+
         return myList[index];
-
-        if (myVersion == -1) ThrowResultObtained();
-        if ((uint)index >= (uint)myCount) ThrowOutOfRange();
-
-        return myArray[index];
       }
       set
       {
-        if (myVersion == -1) ThrowResultObtained();
-        if ((uint)index >= (uint)myCount) ThrowOutOfRange();
+        if (myList == null) ThrowOutOfRange();
 
-        myArray[index] = value;
+        myList[index] = value;
       }
     }
 
-    [Pure] public bool Any() => myCount > 0;
+    [Pure] public bool Any()
+    {
+      return myList != null && myList.Count > 0;
+    }
 
     [Pure]
     public bool Any([InstantHandle, NotNull] Func<T, bool> predicate)
@@ -186,29 +187,6 @@ namespace JetBrains.Util
         return default;
 
       return myArray[myCount - 1];
-    }
-
-    public void Add(T item)
-    {
-      if (myVersion == -1) ThrowResultObtained();
-
-      // If there were no array, just create new
-      if (myArray == null)
-      {
-        myArray = new T[DefaultFirstSize];
-        myNextSize = DefaultFirstSize * 2;
-      }
-      else if (myCount == myArray.Length)
-      {
-        var newArray = new T[myNextSize];
-        myNextSize += myArray.Length;
-
-        Array.Copy(myArray, 0, newArray, 0, myCount);
-        myArray = newArray;
-      }
-
-      myArray[myCount++] = item;
-      myVersion++;
     }
 
     public void AddRange<TSource>([NotNull] IEnumerable<TSource> items)
@@ -619,6 +597,7 @@ namespace JetBrains.Util
 
       public T Current => myCurrent;
 
+      [ContractAnnotation("=> halt")]
       private static void ThrowCollectionModified()
       {
         throw new InvalidOperationException("Collection has been modified");
@@ -627,22 +606,26 @@ namespace JetBrains.Util
 
     // note: those methods extracted to avoid complex control flow in methods preventing inlining
 
+    [ContractAnnotation("=> halt")]
     private static void ThrowOutOfRange()
     {
       // ReSharper disable once NotResolvedInText
       throw new ArgumentOutOfRangeException("index", "Index should be non-negative and less than Count");
     }
 
+    [ContractAnnotation("=> halt")]
     private static void ThrowResultObtained()
     {
       throw new InvalidOperationException("Result has been already obtained from this list");
     }
 
+    [ContractAnnotation("=> halt")]
     private static void ThrowEmpty()
     {
       throw new InvalidOperationException("No items in LocalList2");
     }
 
+    [ContractAnnotation("=> halt")]
     private static void ThrowManyItems()
     {
       throw new InvalidOperationException("More than single item in LocalList2");
