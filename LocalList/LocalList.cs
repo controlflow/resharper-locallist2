@@ -84,6 +84,7 @@ namespace JetBrains.Util
     {
       get
       {
+        // todo: not necessary
         if (myVersion == -1) ThrowResultObtained();
 
         return myCount;

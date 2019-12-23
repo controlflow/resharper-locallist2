@@ -99,7 +99,7 @@ namespace JetBrains.Util.DataStructures.Collections
       // note: this must be of `int` type to use `Interlocked.CompareExchange()`
       internal int CountAndIterationData;
 
-      protected bool IsFrozen => (CountAndIterationData & NotFrozenBit) != 0;
+      protected bool IsFrozen => (CountAndIterationData & NotFrozenBit) == 0;
 
       public int ShortCount => (int) ((uint) CountAndIterationData >> CountShift);
 
@@ -120,7 +120,7 @@ namespace JetBrains.Util.DataStructures.Collections
       // iterator/version data is stored in first 16 bits
       // but we include count there as well, because why not
       // todo: possible store in short?
-      protected int Version => CountAndIterationData;
+      public int Version => CountAndIterationData;
 
       protected const int IteratorOrVersionMask = (1 << FrozenBitShift) - 1;
       protected const int VersionAndCountIncrement = (1 << CountShift) + 1;
@@ -241,7 +241,11 @@ namespace JetBrains.Util.DataStructures.Collections
       #endregion
       #region Read access
 
-      public abstract T this[int index] { get; set; }
+      public abstract T this[int index]
+      {
+        get;
+        set; // todo: modify version
+      }
 
       // todo: make use of .Count in both of those methods
       public abstract int IndexOf(T item);
@@ -262,13 +266,13 @@ namespace JetBrains.Util.DataStructures.Collections
       #endregion
       #region Write access
 
-      public bool IsReadOnly => true;
+      bool ICollection<T>.IsReadOnly => true;
 
-      public void Add(T item) => throw new CollectionReadOnlyException();
-      public void Insert(int index, T item) => throw new CollectionReadOnlyException();
-      public void RemoveAt(int index) => throw new CollectionReadOnlyException();
-      public bool Remove(T item) => throw new CollectionReadOnlyException();
-      public void Clear() => throw new CollectionReadOnlyException();
+      void ICollection<T>.Add(T item) => throw new CollectionReadOnlyException();
+      void IList<T>.Insert(int index, T item) => throw new CollectionReadOnlyException();
+      void IList<T>.RemoveAt(int index) => throw new CollectionReadOnlyException();
+      bool ICollection<T>.Remove(T item) => throw new CollectionReadOnlyException();
+      void ICollection<T>.Clear() => throw new CollectionReadOnlyException();
 
       #endregion
 
@@ -299,6 +303,23 @@ namespace JetBrains.Util.DataStructures.Collections
         }
 
         return true;
+      }
+
+      public abstract void ClearImpl();
+
+      public void ModifyVersion()
+      {
+        Debug.Assert(!IsFrozen);
+        CountAndIterationData++;
+      }
+
+      [NotNull]
+      public Builder<T> Freeze()
+      {
+        if (IsFrozen) ThrowFrozen();
+
+        CountAndIterationData &= ~NotFrozenBit;
+        return this;
       }
     }
 
@@ -349,7 +370,7 @@ namespace JetBrains.Util.DataStructures.Collections
           {
             CountAndIterationData = NotFrozenCount2,
             Item0 = Item0,
-            Item2 = newItem
+            Item1 = newItem
           };
         }
       }
@@ -381,6 +402,14 @@ namespace JetBrains.Util.DataStructures.Collections
         if (ShortCount == 1 && EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
 
         return -1;
+      }
+
+      public override void ClearImpl()
+      {
+        if (IsFrozen) ThrowFrozen();
+
+        CountAndIterationData = NotFrozenCount0 | ((CountAndIterationData & IteratorOrVersionMask) + 1);
+        Item0 = default;
       }
 
       protected override void CopyToImpl(T[] array, int arrayIndex)
@@ -500,6 +529,15 @@ namespace JetBrains.Util.DataStructures.Collections
         }
 
         return -1;
+      }
+
+      public override void ClearImpl()
+      {
+        if (IsFrozen) ThrowFrozen();
+
+        CountAndIterationData = NotFrozenCount0 | ((CountAndIterationData & IteratorOrVersionMask) + 1);
+        Item0 = default;
+        Item1 = default;
       }
 
       protected override void CopyToImpl(T[] array, int arrayIndex)
@@ -670,6 +708,16 @@ namespace JetBrains.Util.DataStructures.Collections
         }
 
         return -1;
+      }
+
+      public override void ClearImpl()
+      {
+        if (IsFrozen) ThrowFrozen();
+
+        CountAndIterationData = NotFrozenCount0 | ((CountAndIterationData & IteratorOrVersionMask) + 1);
+        Item0 = default;
+        Item1 = default;
+        Item2 = default;
       }
 
       protected override void CopyToImpl(T[] array, int arrayIndex)
@@ -866,6 +914,17 @@ namespace JetBrains.Util.DataStructures.Collections
         }
 
         return -1;
+      }
+
+      public override void ClearImpl()
+      {
+        if (IsFrozen) ThrowFrozen();
+
+        CountAndIterationData = NotFrozenCount0 | ((CountAndIterationData & IteratorOrVersionMask) + 1);
+        Item0 = default;
+        Item1 = default;
+        Item2 = default;
+        Item3 = default;
       }
 
       protected override void CopyToImpl(T[] array, int arrayIndex)
@@ -1112,6 +1171,21 @@ namespace JetBrains.Util.DataStructures.Collections
         return -1;
       }
 
+      public override void ClearImpl()
+      {
+        if (IsFrozen) ThrowFrozen();
+
+        CountAndIterationData = NotFrozenCount0 | ((CountAndIterationData & IteratorOrVersionMask) + 1);
+        Item0 = default;
+        Item1 = default;
+        Item2 = default;
+        Item3 = default;
+        Item4 = default;
+        Item5 = default;
+        Item6 = default;
+        Item7 = default;
+      }
+
       protected override void CopyToImpl(T[] array, int arrayIndex)
       {
         var count = ShortCount;
@@ -1263,6 +1337,15 @@ namespace JetBrains.Util.DataStructures.Collections
         throw new NotImplementedException();
       }
 
+      public override void ClearImpl()
+      {
+        if (IsFrozen) ThrowFrozen();
+
+        Array.Clear(myArray, index: 0, length: myCount);
+        myCount = 0;
+        CountAndIterationData++;
+      }
+
       protected override void CopyToImpl(T[] array, int arrayIndex)
       {
         throw new NotImplementedException();
@@ -1283,69 +1366,6 @@ namespace JetBrains.Util.DataStructures.Collections
 
           myArray[index] = value;
         }
-      }
-    }
-
-    // todo: can we implement this?
-    internal sealed class ListOfRefArray<T> : Builder<T>
-      where T : class
-    {
-      private struct Element : IEquatable<Element>
-      {
-        public T Value;
-
-        public bool Equals(Element other)
-        {
-          return EqualityComparer<T>.Default.Equals(Value, other.Value);
-        }
-
-        public override bool Equals(object obj) => throw new InvalidOperationException();
-        public override int GetHashCode() => throw new InvalidOperationException();
-      }
-
-      private Element[] myArray;
-      private int myCount;
-
-      public override int Capacity => myArray.Length;
-
-      public override ref T GetItemNoRangeCheck(int index)
-      {
-        if ((uint) index <= (uint) myCount) ThrowOutOfRange();
-
-        return ref myArray[index].Value;
-      }
-
-      public override void Append(in T newItem, ref Builder<T> self)
-      {
-        throw new NotImplementedException();
-      }
-
-      public override Builder<T> Clone()
-      {
-        throw new NotImplementedException();
-      }
-
-      public override Builder<T> TrimExcess(bool clone)
-      {
-        throw new NotImplementedException();
-      }
-
-      public override int IndexOf(T item)
-      {
-        throw new NotImplementedException();
-      }
-
-      protected override void CopyToImpl(T[] array, int arrayIndex)
-      {
-        throw new NotImplementedException();
-      }
-
-      public override T Current => throw new NotImplementedException();
-
-      public override T this[int index]
-      {
-        get { throw new NotImplementedException(); }
-        set { throw new NotImplementedException(); }
       }
     }
 

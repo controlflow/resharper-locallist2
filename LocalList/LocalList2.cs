@@ -13,6 +13,9 @@ namespace JetBrains.Util
 {
   // NOTE: [downside] may allocate array instead of returning internal one
   // todo: check with 65636 'byte' items
+  // todo: check indexer
+  // todo: check enumeration
+  // todo: annotate methods readonly
 
   /// <summary>
   /// Represents collection of items that doesn't create heap objects unless items are added
@@ -99,9 +102,9 @@ namespace JetBrains.Util
     /// <summary>
     /// Gets the number of elements contained in the <see cref="LocalList2{T}"/>.
     /// </summary>
-    public int Count => myList == null ? 0 : myList.Count;
+    public readonly int Count => myList == null ? 0 : myList.Count;
 
-    public int Capacity => myList == null ? 0 : myList.Capacity;
+    public readonly int Capacity => myList == null ? 0 : myList.Capacity;
 
     public void Add(T item)
     {
@@ -111,7 +114,7 @@ namespace JetBrains.Util
         myList.Append(in item, ref myList);
     }
 
-    public T this[int index]
+    public readonly T this[int index]
     {
       get
       {
@@ -127,13 +130,13 @@ namespace JetBrains.Util
       }
     }
 
-    [Pure] public bool Any()
+    [Pure] public readonly bool Any()
     {
       return myList != null && myList.ShortCount > 0;
     }
 
     [Pure]
-    public bool Any([InstantHandle, NotNull] Func<T, bool> predicate)
+    public readonly bool Any([InstantHandle, NotNull] Func<T, bool> predicate)
     {
       for (var index = 0; index < myCount; index++)
       {
@@ -145,7 +148,7 @@ namespace JetBrains.Util
     }
 
     [Pure]
-    public T Last()
+    public readonly T Last()
     {
       if (myCount == 0) ThrowEmpty();
 
@@ -153,7 +156,7 @@ namespace JetBrains.Util
     }
 
     [Pure]
-    public T First()
+    public readonly T First()
     {
       if (myCount == 0) ThrowEmpty();
 
@@ -161,7 +164,7 @@ namespace JetBrains.Util
     }
 
     [Pure]
-    public T Single()
+    public readonly T Single()
     {
       if (myCount == 0) ThrowEmpty();
       if (myCount > 1) ThrowManyItems();
@@ -169,10 +172,10 @@ namespace JetBrains.Util
       return myArray[0];
     }
 
-    [CanBeNull] public T SingleItem => myCount == 1 ? myArray[0] : default;
+    [CanBeNull] public readonly T SingleItem => myCount == 1 ? myArray[0] : default;
 
     [Pure, CanBeNull]
-    public T FirstOrDefault()
+    public readonly T FirstOrDefault()
     {
       if (myCount == 0)
         return default;
@@ -181,7 +184,7 @@ namespace JetBrains.Util
     }
 
     [Pure, CanBeNull]
-    public T LastOrDefault()
+    public readonly T LastOrDefault()
     {
       if (myCount == 0)
         return default;
@@ -252,37 +255,12 @@ namespace JetBrains.Util
       myCount += count;
     }
 
-    // Changes myNextSize as side-effect
-    private int CalculateNewAndNextSize(int currentSize, int capacity)
-    {
-      int newSize;
-      if (currentSize == 0)
-      {
-        newSize = DefaultFirstSize;
-        myNextSize = DefaultFirstSize * 2;
-      }
-      else
-      {
-        newSize = myNextSize;
-        myNextSize += currentSize;
-      }
-
-      while (newSize < capacity)
-      {
-        var size = newSize;
-        newSize = myNextSize;
-        myNextSize += size;
-      }
-
-      return newSize;
-    }
-
     public void EnsureCapacity(int capacity, bool exact = false)
     {
       var currentSize = Capacity;
       if (capacity <= currentSize) return;
 
-      var newSize = CalculateNewAndNextSize(currentSize, capacity);
+      var newSize = capacity * 2;
       if (exact)
       {
         newSize = capacity;
@@ -369,15 +347,7 @@ namespace JetBrains.Util
 
     public void Clear()
     {
-      if (myVersion == -1) ThrowResultObtained();
-
-      if (myCount > 0)
-      {
-        Array.Clear(myArray, 0, myCount);
-        myCount = 0;
-      }
-
-      myVersion++;
+      myList?.ClearImpl();
     }
 
     [Pure]
@@ -418,7 +388,7 @@ namespace JetBrains.Util
       if (myArray == null)
       {
         Debug.Assert(atIndex == 0, "atIndex == 0");
-        var newSize = CalculateNewAndNextSize(0, myCount + length);
+        var newSize = 42;
         var newArray = new T[newSize];
         myArray = newArray;
       }
@@ -426,7 +396,7 @@ namespace JetBrains.Util
       {
         // No free space, reallocate the array and copy items
         // Array grows with Fibonacci speed, not exponential
-        var newSize = CalculateNewAndNextSize(myArray.Length, myCount + length);
+        var newSize = 42;
         var newArray = new T[newSize];
         Array.Copy(myArray, newArray, atIndex);
         Array.Copy(myArray, atIndex, newArray, atIndex + length, myCount - atIndex);
@@ -522,29 +492,47 @@ namespace JetBrains.Util
     [Pure]
     public ElementEnumerator GetEnumerator()
     {
-      if (myVersion == -1) ThrowResultObtained();
+      // todo: throw results obtained?
 
-      return new ElementEnumerator(this);
+      return new ElementEnumerator(myList ?? FrozenEmpty);
     }
 
     [Pure, NotNull]
     public IList<T> ResultingList()
     {
-      return (IList<T>)ReadOnlyList();
+      if (myList == null)
+      {
+        myList = FrozenEmpty;
+        return EmptyList<T>.Instance;
+      }
+
+      return myList.Freeze();
     }
 
     [Pure, NotNull]
     public IReadOnlyList<T> ReadOnlyList()
     {
-      if (myVersion == -1) ThrowResultObtained();
+      if (myList == null)
+      {
+        myList = FrozenEmpty;
+        return EmptyList<T>.Instance;
+      }
 
-      myVersion = -1;
-
-      return FixedList.FromArray(myArray, myCount);
+      return myList.Freeze();
     }
 
     public override string ToString()
     {
+      if (myList == null) return "[]";
+
+      //myList.Aggregate((a, x) =>
+      //{
+      //  if (a.Length > 0) a.Append(", ");
+      //  a.Append(x);
+      //}, new StringBuilder());
+
+
+
       if (myArray == null) return "[]";
 
       var builder = new StringBuilder();
@@ -561,41 +549,34 @@ namespace JetBrains.Util
       return builder.ToString();
     }
 
+    private static FixedList.Builder<T> Empty = new FixedList.ListOf1<T>();
+    private static FixedList.Builder<T> FrozenEmpty = new FixedList.ListOf1<T> { CountAndIterationData = 0 };
+
     [Serializable]
     [StructLayout(LayoutKind.Auto)]
     public struct ElementEnumerator
     {
-      private readonly LocalList2<T> myList;
+      private readonly FixedList.Builder<T> myBuilder;
       private readonly int myVersion;
-      private int myIndex;
-      private T myCurrent;
+      private int myIndex, myCount;
 
-      internal ElementEnumerator(in LocalList2<T> collection)
+      internal ElementEnumerator([NotNull] FixedList.Builder<T> builder)
       {
-        myList = collection;
-        myVersion = LocalList2<T>.myVersion;
-        myIndex = 0;
-        myCurrent = default;
+        myBuilder = builder;
+        myVersion = builder.Version;
+        myCount = builder.Count;
+        myIndex = -1;
       }
 
       public bool MoveNext()
       {
-        if (myVersion != LocalList2<T>.myVersion)
+        if (myVersion != myBuilder.Version)
           ThrowCollectionModified();
 
-        if (myIndex < LocalList2<T>.myCount)
-        {
-          myCurrent = LocalList2<T>.myArray[myIndex];
-          myIndex++;
-          return true;
-        }
-
-        myIndex = myCount + 1;
-        myCurrent = default;
-        return false;
+        return ++myIndex < myCount;
       }
 
-      public T Current => myCurrent;
+      public readonly T Current => myBuilder.GetItemNoRangeCheck(myIndex);
 
       [ContractAnnotation("=> halt")]
       private static void ThrowCollectionModified()
@@ -610,7 +591,8 @@ namespace JetBrains.Util
     private static void ThrowOutOfRange()
     {
       // ReSharper disable once NotResolvedInText
-      throw new ArgumentOutOfRangeException("index", "Index should be non-negative and less than Count");
+      throw new ArgumentOutOfRangeException(
+        "index", "Index should be non-negative and less than Count");
     }
 
     [ContractAnnotation("=> halt")]
@@ -648,7 +630,8 @@ namespace JetBrains.Util
       myList = localList;
     }
 
-    [NotNull, DebuggerBrowsable(DebuggerBrowsableState.RootHidden)]
+    [NotNull, UsedImplicitly]
+    [DebuggerBrowsable(DebuggerBrowsableState.RootHidden)]
     public T[] Items => myList.ToArray();
   }
 }
