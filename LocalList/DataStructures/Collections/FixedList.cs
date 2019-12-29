@@ -106,7 +106,15 @@ namespace JetBrains.Util.DataStructures.Collections
 
       internal bool IsFrozen => CountAndIterationData >= 0;
 
-      public int ShortCount => (int) ((uint) CountAndIterationData << 1 >> CountShift + 1);
+      public int ShortCount
+      {
+        get
+        {
+          Debug.Assert(IsFrozen);
+
+          return (int) ((uint) CountAndIterationData << 1 >> CountShift + 1);
+        }
+      }
 
       protected const int FrozenBitShift = 31;
       protected const int CountShift = 16;
@@ -162,10 +170,10 @@ namespace JetBrains.Util.DataStructures.Collections
       public abstract void Append(in T newItem, int count, ref Builder<T> self);
 
       [NotNull, Pure]
-      public abstract Builder<T> Clone();
+      public abstract Builder<T> Clone(int count);
 
       [CanBeNull]
-      public abstract Builder<T> TrimExcess(bool clone);
+      public abstract Builder<T> TrimExcess(int count, bool clone);
 
       protected abstract void CopyToImpl([NotNull] T[] array, int arrayIndex);
 
@@ -202,19 +210,10 @@ namespace JetBrains.Util.DataStructures.Collections
           Debug.Assert(builder.IsFrozen);
 
           myBuilder = builder;
+          myIndex = -1;
         }
 
-        public bool MoveNext()
-        {
-          var nextIndex = ++myIndex;
-          if (nextIndex < myBuilder.ShortCount)
-          {
-            myIndex = nextIndex;
-            return true;
-          }
-
-          return false;
-        }
+        public bool MoveNext() => myIndex++ < myBuilder.ShortCount;
 
         public T Current => myBuilder.GetItemNoRangeCheck(myIndex);
         object IEnumerator.Current => Current;
@@ -228,7 +227,7 @@ namespace JetBrains.Util.DataStructures.Collections
         Debug.Assert(IsFrozen);
 
         var newIterator = (CountAndIterationData + 1) & IteratorOrVersionMask;
-        if (newIterator == (newIterator >> CountShift)) return false;
+        if (newIterator == (CountAndIterationData >> CountShift)) return false;
 
         CountAndIterationData = CountAndIterationData & ~IteratorOrVersionMask | newIterator;
         return true;
@@ -263,10 +262,24 @@ namespace JetBrains.Util.DataStructures.Collections
         CountAndIterationData = (CountAndIterationData + 1) & ~NotFrozenBit;
       }
 
-      int IList<T>.IndexOf(T item) => IndexOf(item, ShortCount);
+      public int IndexOf(T item)
+      {
+        Debug.Assert(IsFrozen);
+
+        return IndexOf(item, Count);
+      }
 
       [Pure]
-      public abstract int IndexOf(T item, int count);
+      public virtual int IndexOf(T item, int count)
+      {
+        for (var index = 0; index < count; index++)
+        {
+          var currentItem = GetItemNoRangeCheck(index);
+          if (EqualityComparer<T>.Default.Equals(item, currentItem)) return index;
+        }
+
+        return -1;
+      }
 
       public bool Contains(T item) => IndexOf(item, Count) >= 0;
 
@@ -338,18 +351,7 @@ namespace JetBrains.Util.DataStructures.Collections
         return builder.Append(')').ToString();
       }
 
-      public bool AllFreeSlotsAreClear()
-      {
-        for (int index = Count, capacity = Capacity; index < capacity; index++)
-        {
-          var item = GetItemNoRangeCheck(index);
-          if (!EqualityComparer<T>.Default.Equals(item, default)) return false;
-        }
-
-        return true;
-      }
-
-      public abstract void Clear();
+      public abstract void Clear(int count);
 
       public void ModifyVersion()
       {
@@ -358,7 +360,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public virtual void Freeze(int count)
       {
-        CountAndIterationData = count | BeforeGetEnumerator;
+        CountAndIterationData = (count << CountShift) | BeforeGetEnumerator;
       }
     }
 
@@ -407,9 +409,9 @@ namespace JetBrains.Util.DataStructures.Collections
         }
       }
 
-      public override Builder<T> Clone()
+      public override Builder<T> Clone(int count)
       {
-        if (IsFrozen) ThrowResultObtained();
+        Debug.Assert(!IsFrozen);
 
         return new ListOf1<T>
         {
@@ -418,28 +420,18 @@ namespace JetBrains.Util.DataStructures.Collections
         };
       }
 
-      public override Builder<T> TrimExcess(bool clone)
+      public override Builder<T> TrimExcess(int count, bool clone)
       {
-        if (IsFrozen) ThrowResultObtained();
+        Debug.Assert(!IsFrozen);
 
-        if (ShortCount == 0) return null;
+        if (count == 0) return null;
 
-        return clone ? Clone() : this;
+        return clone ? Clone(count) : this;
       }
 
       public override T Current => Item0;
 
-      public override int IndexOf(T item, int count)
-      {
-        if (count == 1)
-        {
-          if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
-        }
-
-        return -1;
-      }
-
-      public override void Clear()
+      public override void Clear(int count)
       {
         Debug.Assert(!IsFrozen);
 
@@ -506,9 +498,9 @@ namespace JetBrains.Util.DataStructures.Collections
         };
       }
 
-      public override Builder<T> Clone()
+      public override Builder<T> Clone(int count)
       {
-        if (IsFrozen) ThrowResultObtained();
+        Debug.Assert(!IsFrozen);
 
         return new ListOf2<T>
         {
@@ -518,15 +510,15 @@ namespace JetBrains.Util.DataStructures.Collections
         };
       }
 
-      public override Builder<T> TrimExcess(bool clone)
+      public override Builder<T> TrimExcess(int count, bool clone)
       {
-        if (IsFrozen) ThrowResultObtained();
+        Debug.Assert(!IsFrozen);
 
-        switch (ShortCount)
+        switch (count)
         {
           case 0: return null;
           case 1: return new ListOf1<T> {CountAndIterationData = NotFrozenCount1, Item0 = Item0};
-          default: return clone ? Clone() : this;
+          default: return clone ? Clone(count) : this;
         }
       }
 
@@ -539,22 +531,7 @@ namespace JetBrains.Util.DataStructures.Collections
         }
       }
 
-      public override int IndexOf(T item, int count)
-      {
-        if (count > 0)
-        {
-          if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
-
-          if (count > 1)
-          {
-            if (EqualityComparer<T>.Default.Equals(item, Item1)) return 1;
-          }
-        }
-
-        return -1;
-      }
-
-      public override void Clear()
+      public override void Clear(int count)
       {
         Debug.Assert(!IsFrozen);
 
@@ -639,9 +616,9 @@ namespace JetBrains.Util.DataStructures.Collections
         };
       }
 
-      public override Builder<T> Clone()
+      public override Builder<T> Clone(int count)
       {
-        if (IsFrozen) ThrowResultObtained();
+        Debug.Assert(!IsFrozen);
 
         return new ListOf3<T>
         {
@@ -652,11 +629,11 @@ namespace JetBrains.Util.DataStructures.Collections
         };
       }
 
-      public override Builder<T> TrimExcess(bool clone)
+      public override Builder<T> TrimExcess(int count, bool clone)
       {
-        if (IsFrozen) ThrowResultObtained();
+        Debug.Assert(!IsFrozen);
 
-        switch (ShortCount)
+        switch (count)
         {
           case 0:
             return null;
@@ -677,7 +654,7 @@ namespace JetBrains.Util.DataStructures.Collections
             };
 
           default:
-            return clone ? Clone() : this;
+            return clone ? Clone(count) : this;
         }
       }
 
@@ -694,27 +671,7 @@ namespace JetBrains.Util.DataStructures.Collections
         }
       }
 
-      public override int IndexOf(T item, int count)
-      {
-        if (count > 0)
-        {
-          if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
-
-          if (count > 1)
-          {
-            if (EqualityComparer<T>.Default.Equals(item, Item1)) return 1;
-
-            if (count > 2)
-            {
-              if (EqualityComparer<T>.Default.Equals(item, Item2)) return 2;
-            }
-          }
-        }
-
-        return -1;
-      }
-
-      public override void Clear()
+      public override void Clear(int count)
       {
         Debug.Assert(!IsFrozen);
 
@@ -769,13 +726,7 @@ namespace JetBrains.Util.DataStructures.Collections
         {
           if ((uint) index >= (uint) ShortCount) ThrowOutOfRange();
 
-          switch (index)
-          {
-            case 0: return Item0;
-            case 1: return Item1;
-            case 2: return Item2;
-            default: return Item3;
-          }
+          return GetItemNoRangeCheck(index);
         }
         set => throw new CollectionReadOnlyException();
       }
@@ -821,9 +772,9 @@ namespace JetBrains.Util.DataStructures.Collections
         };
       }
 
-      public override Builder<T> Clone()
+      public override Builder<T> Clone(int count)
       {
-        if (IsFrozen) ThrowResultObtained();
+        Debug.Assert(!IsFrozen);
 
         return new ListOf4<T>
         {
@@ -835,11 +786,11 @@ namespace JetBrains.Util.DataStructures.Collections
         };
       }
 
-      public override Builder<T> TrimExcess(bool clone)
+      public override Builder<T> TrimExcess(int count, bool clone)
       {
-        if (IsFrozen) ThrowResultObtained();
+        Debug.Assert(!IsFrozen);
 
-        switch (ShortCount)
+        switch (count)
         {
           case 0:
             return null;
@@ -869,7 +820,7 @@ namespace JetBrains.Util.DataStructures.Collections
             };
 
           default:
-            return clone ? Clone() : this;
+            return clone ? Clone(count) : this;
         }
       }
 
@@ -887,32 +838,7 @@ namespace JetBrains.Util.DataStructures.Collections
         }
       }
 
-      public override int IndexOf(T item, int count)
-      {
-        if (count > 0)
-        {
-          if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
-
-          if (count > 1)
-          {
-            if (EqualityComparer<T>.Default.Equals(item, Item1)) return 1;
-
-            if (count > 2)
-            {
-              if (EqualityComparer<T>.Default.Equals(item, Item2)) return 2;
-
-              if (count > 3)
-              {
-                if (EqualityComparer<T>.Default.Equals(item, Item3)) return 3;
-              }
-            }
-          }
-        }
-
-        return -1;
-      }
-
-      public override void Clear()
+      public override void Clear(int count)
       {
         Debug.Assert(!IsFrozen);
 
@@ -1028,9 +954,9 @@ namespace JetBrains.Util.DataStructures.Collections
         return result;
       }
 
-      public override Builder<T> Clone()
+      public override Builder<T> Clone(int count)
       {
-        if (IsFrozen) ThrowResultObtained();
+        Debug.Assert(!IsFrozen);
 
         return new ListOf8<T>
         {
@@ -1046,11 +972,11 @@ namespace JetBrains.Util.DataStructures.Collections
         };
       }
 
-      public override Builder<T> TrimExcess(bool clone)
+      public override Builder<T> TrimExcess(int count, bool clone)
       {
-        if (IsFrozen) ThrowResultObtained();
+        Debug.Assert(!IsFrozen);
 
-        switch (ShortCount)
+        switch (count)
         {
           case 0:
             return null;
@@ -1096,7 +1022,7 @@ namespace JetBrains.Util.DataStructures.Collections
           //   return new ListOfArray<T>();
 
           default:
-            return clone ? Clone() : this;
+            return clone ? Clone(count) : this;
         }
       }
 
@@ -1104,66 +1030,12 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         get
         {
-          switch (CountAndIterationData & IteratorOrVersionMask)
-          {
-            case 0: return Item0;
-            case 1: return Item1;
-            case 2: return Item2;
-            case 3: return Item3;
-            case 4: return Item4;
-            case 5: return Item5;
-            case 6: return Item6;
-            default: return Item7;
-          }
+          var index = CountAndIterationData & IteratorOrVersionMask;
+          return GetItemNoRangeCheck(index);
         }
       }
 
-      public override int IndexOf(T item, int count)
-      {
-        if (count > 0)
-        {
-          if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
-
-          if (count > 1)
-          {
-            if (EqualityComparer<T>.Default.Equals(item, Item1)) return 1;
-
-            if (count > 2)
-            {
-              if (EqualityComparer<T>.Default.Equals(item, Item2)) return 2;
-
-              if (count > 3)
-              {
-                if (EqualityComparer<T>.Default.Equals(item, Item3)) return 3;
-
-                if (count > 4)
-                {
-                  if (EqualityComparer<T>.Default.Equals(item, Item4)) return 4;
-
-                  if (count > 5)
-                  {
-                    if (EqualityComparer<T>.Default.Equals(item, Item5)) return 5;
-
-                    if (count > 6)
-                    {
-                      if (EqualityComparer<T>.Default.Equals(item, Item6)) return 6;
-
-                      if (count > 7)
-                      {
-                        if (EqualityComparer<T>.Default.Equals(item, Item7)) return 7;
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        return -1;
-      }
-
-      public override void Clear()
+      public override void Clear(int count)
       {
         Debug.Assert(!IsFrozen);
 
@@ -1264,28 +1136,28 @@ namespace JetBrains.Util.DataStructures.Collections
         myArray[count] = newItem;
       }
 
-      public override Builder<T> Clone()
+      public override Builder<T> Clone(int count)
       {
-        if (IsFrozen) ThrowResultObtained();
+        Debug.Assert(!IsFrozen);
 
         var newArray = new T[myArray.Length];
-        Array.Copy(myArray, newArray, myCount);
+        Array.Copy(myArray, newArray, count);
 
-        var result = new ListOfArray<T>(newArray, myCount);
+        var result = new ListOfArray<T>(newArray, count);
         result.CountAndIterationData |= NotFrozenBit; // unfreeze
         return result;
       }
 
-      public override Builder<T> TrimExcess(bool clone)
+      public override Builder<T> TrimExcess(int count, bool clone)
       {
-        if (IsFrozen) ThrowResultObtained();
+        Debug.Assert(!IsFrozen);
 
-        if (clone && myCount == myArray.Length)
+        if (clone && count == myArray.Length)
         {
-          return Clone();
+          return Clone(count);
         }
 
-        switch (myCount)
+        switch (count)
         {
           case 0:
             return null;
@@ -1325,7 +1197,7 @@ namespace JetBrains.Util.DataStructures.Collections
             };
 
           default:
-            return clone ? Clone() : this;
+            return clone ? Clone(count) : this;
         }
       }
 
@@ -1336,11 +1208,11 @@ namespace JetBrains.Util.DataStructures.Collections
         return Array.IndexOf(myArray, item, startIndex: 0, count: count);
       }
 
-      public override void Clear()
+      public override void Clear(int count)
       {
         Debug.Assert(!IsFrozen);
 
-        Array.Clear(myArray, index: 0, length: myCount);
+        Array.Clear(myArray, index: 0, length: count);
       }
 
       public override void Freeze(int count)
@@ -1365,6 +1237,30 @@ namespace JetBrains.Util.DataStructures.Collections
           return myArray[index];
         }
         set => throw new CollectionReadOnlyException();
+      }
+
+      private sealed class Enumerator : IEnumerator<T>
+      {
+        [NotNull] private readonly T[] myArray;
+        private readonly int myCount;
+        private int myIndex;
+
+        public Enumerator(ListOfArray<T> builder)
+        {
+          Debug.Assert(builder.IsFrozen);
+
+          myArray = builder.myArray;
+          myCount = builder.myCount;
+          myIndex = -1;
+        }
+
+        public bool MoveNext() => myIndex++ < myCount;
+
+        public T Current => myArray[myIndex];
+        object IEnumerator.Current => Current;
+
+        public void Dispose() { }
+        public void Reset() { }
       }
     }
 

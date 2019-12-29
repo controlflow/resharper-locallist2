@@ -50,7 +50,11 @@ namespace JetBrains.Util
       var otherList = other.myList;
       if (otherList != null)
       {
-        myList = preserveCapacity ? otherList.Clone() : otherList.TrimExcess(clone: true);
+        if (otherList.IsFrozen) ThrowResultObtained();
+
+        myList = preserveCapacity
+          ? otherList.Clone(myCount)
+          : otherList.TrimExcess(myCount, clone: true);
       }
       else
       {
@@ -129,7 +133,7 @@ namespace JetBrains.Util
         if (myList == null) ThrowOutOfRange();
         if (myList.IsFrozen) ThrowResultObtained();
 
-        if ((uint) index > (uint) myCount) ThrowOutOfRange();
+        if ((uint) index >= (uint) myCount) ThrowOutOfRange();
 
         return myList.GetItemNoRangeCheck(index);
       }
@@ -138,7 +142,7 @@ namespace JetBrains.Util
         if (myList == null) ThrowOutOfRange();
         if (myList.IsFrozen) ThrowResultObtained();
 
-        if ((uint) index > (uint) myCount) ThrowOutOfRange();
+        if ((uint) index >= (uint) myCount) ThrowOutOfRange();
 
         myList.GetItemNoRangeCheck(index) = value;
         myList.ModifyVersion();
@@ -201,7 +205,7 @@ namespace JetBrains.Util
         if (myList.IsFrozen) ThrowResultObtained();
 
         myList.ModifyVersion();
-        myList.Clear();
+        myList.Clear(myCount);
         myCount = 0;
       }
     }
@@ -709,7 +713,13 @@ namespace JetBrains.Util
     {
       if (myList == null) return true;
 
-      return myList.AllFreeSlotsAreClear();
+      for (int index = myCount, capacity = myList.Capacity; index < capacity; index++)
+      {
+        var item = myList.GetItemNoRangeCheck(index);
+        if (!EqualityComparer<T>.Default.Equals(item, default)) return false;
+      }
+
+      return true;
     }
   }
 

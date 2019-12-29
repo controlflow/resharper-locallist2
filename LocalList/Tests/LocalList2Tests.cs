@@ -53,8 +53,8 @@ namespace JetBrains.Util.Tests
     {
       foreach (var list in CreateVariousFilledLocalLists())
       {
-        Console.WriteLine($"count={list.Count}, capacity={list.Capacity}");
-        if (list.Count != 0 || list.Capacity != 1) continue;
+        //Console.WriteLine($"count={list.Count}, capacity={list.Capacity}");
+        //if (list.Count != 0 || list.Capacity != 1) continue;
 
         var sameCapacityClone = new LocalList2<int>(in list, preserveCapacity: true);
 
@@ -115,7 +115,8 @@ namespace JetBrains.Util.Tests
           Assert.AreEqual(bytes[index], list[index]);
         }
 
-        Console.WriteLine($"count={list.Count}, capacity={list.Capacity}");
+        //Console.WriteLine($"count={list.Count}, capacity={list.Capacity}");
+        //if (list.Count != 1 || list.Capacity != 4) continue;
 
         Assert.Throws<ArgumentOutOfRangeException>(() => _ = list[-1]);
         Assert.Throws<ArgumentOutOfRangeException>(() => _ = list[list.Count]);
@@ -157,8 +158,6 @@ namespace JetBrains.Util.Tests
     {
       foreach (var capacity in CapacitiesToTest)
       {
-        Console.WriteLine(capacity);
-
         var list = new LocalList2<string>(capacity);
         list.Add("abc");
         list.Add("def");
@@ -200,8 +199,16 @@ namespace JetBrains.Util.Tests
         using var enumerator2 = resultingList.GetEnumerator(); // reused `this`
         using var enumerator3 = resultingList.GetEnumerator(); // not reused one
 
-        Assert.IsTrue(ReferenceEquals(resultingList, enumerator2));
-        Assert.IsFalse(ReferenceEquals(enumerator2, enumerator3));
+        if (list.Count == 0)
+        {
+          Assert.IsTrue(ReferenceEquals(EmptyEnumerator<int>.Instance, enumerator2));
+          Assert.IsTrue(ReferenceEquals(EmptyEnumerator<int>.Instance, enumerator3));
+        }
+        else
+        {
+          Assert.IsTrue(ReferenceEquals(resultingList, enumerator2));
+          Assert.IsFalse(ReferenceEquals(enumerator2, enumerator3));
+        }
 
         for (var index = 1; index <= list.Count; index++)
         {
@@ -226,11 +233,18 @@ namespace JetBrains.Util.Tests
     {
       foreach (var list in CreateVariousFilledLocalLists())
       {
-        // todo: test this
         foreach (ref var item in list)
         {
-          item = 42;
+          item = 42; // ref T Current { get; }
         }
+
+        Assert.IsTrue(list.AllFreeSlotsAreClear());
+
+        foreach (var item in list)
+          Assert.AreEqual(item, 42);
+
+        foreach (var item in list.ReadOnlyList())
+          Assert.AreEqual(item, 42);
       }
     }
 
@@ -243,7 +257,7 @@ namespace JetBrains.Util.Tests
         var enumerator = list.GetEnumerator();
 
         //Console.WriteLine($"count={list.Count}, capacity={list.Capacity}");
-        //if (list.Count != 9 || list.Capacity != 16) continue;
+        //if (list.Count != 1 || list.Capacity != 9) continue;
 
         list.Clear();
 
