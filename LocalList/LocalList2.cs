@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using JetBrains.Annotations;
@@ -16,6 +17,7 @@ namespace JetBrains.Util
   // todo: check indexer
   // todo: check enumeration
   // todo: annotate methods readonly
+  // todo: must modify version on enlarge
 
   /// <summary>
   /// Represents collection of items that doesn't create heap objects unless items are added
@@ -31,15 +33,20 @@ namespace JetBrains.Util
     private const int DefaultFirstSize = 4;
 
     [CanBeNull] private FixedList.Builder<T> myList;
+    private int myCount;
+
 
     // todo: to be removed
     [Obsolete] private static T[] myArray;
-    [Obsolete] private static int myCount;
     [Obsolete] private static int myNextSize;
     [Obsolete] private static int myVersion;
 
+    #region Constructors
+
     public LocalList2(in LocalList2<T> other, bool preserveCapacity = false)
     {
+      myCount = other.myCount;
+
       var otherList = other.myList;
       if (otherList != null)
       {
@@ -58,9 +65,11 @@ namespace JetBrains.Util
 
       Debug.Assert(capacity >= 0, "capacity >= 0");
 
+      myCount = 0;
+
       if (forceUseArray && capacity > 0)
       {
-        myList = new FixedList.ListOfArray<T>(new T[capacity], count: 0);
+        myList = new FixedList.ListOfArray<T>(capacity);
       }
       else
       {
@@ -75,7 +84,7 @@ namespace JetBrains.Util
           case 6:
           case 7:
           case 8: myList = new FixedList.ListOf8<T>(); break;
-          default: myList = new FixedList.ListOfArray<T>(new T[capacity], count: 0); break;
+          default: myList = new FixedList.ListOfArray<T>(capacity); break;
         }
       }
     }
@@ -83,11 +92,14 @@ namespace JetBrains.Util
     public LocalList2([NotNull] IEnumerable<T> enumerable)
     {
       myList = null;
+      myCount = 0;
       AddRange(enumerable);
     }
 
     public LocalList2([NotNull] T[] array, bool copyArray = true)
     {
+      myCount = 0;
+
       if (copyArray)
       {
         myList = null;
@@ -95,52 +107,157 @@ namespace JetBrains.Util
       }
       else
       {
+        // todo: not recommended
+        // todo: leave Frozen?
         myList = new FixedList.ListOfArray<T>(array, array.Length);
       }
     }
 
+    #endregion
+
     /// <summary>
     /// Gets the number of elements contained in the <see cref="LocalList2{T}"/>.
     /// </summary>
-    public readonly int Count => myList == null ? 0 : myList.Count;
+    public readonly int Count => myCount;
 
     public readonly int Capacity => myList == null ? 0 : myList.Capacity;
-
-    public void Add(T item)
-    {
-      if (myList == null)
-        myList = new FixedList.ListOf4<T>(in item);
-      else
-        myList.Append(in item, ref myList);
-    }
 
     public readonly T this[int index]
     {
       get
       {
         if (myList == null) ThrowOutOfRange();
+        if (myList.IsFrozen) ThrowResultObtained();
 
-        return myList[index];
+        if ((uint) index > (uint) myCount) ThrowOutOfRange();
+
+        return myList.GetItemNoRangeCheck(index);
       }
       set
       {
         if (myList == null) ThrowOutOfRange();
+        if (myList.IsFrozen) ThrowResultObtained();
 
-        myList[index] = value;
+        if ((uint) index > (uint) myCount) ThrowOutOfRange();
+
+        myList.GetItemNoRangeCheck(index) = value;
+        myList.ModifyVersion();
       }
     }
 
-    [Pure] public readonly bool Any()
+    public void Add(T item)
     {
-      return myList != null && myList.ShortCount > 0;
+      if (myList == null)
+      {
+        myList = new FixedList.ListOf4<T>(in item);
+      }
+      else
+      {
+        if (myList.IsFrozen) ThrowResultObtained();
+
+        myList.ModifyVersion();
+        myList.Append(in item, myCount, ref myList);
+      }
+
+      myCount++;
+    }
+
+    [Pure]
+    public readonly int IndexOf(T item)
+    {
+      if (myList == null) return -1;
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      return myList.IndexOf(item, myCount);
+    }
+
+    [Pure]
+    public readonly bool Contains(T item)
+    {
+      if (myList == null) return false;
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      var index = myList.IndexOf(item, myCount);
+      return index >= 0;
+    }
+
+    public bool Remove(T item)
+    {
+      if (myList == null) return false;
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      var index = myList.IndexOf(item, myCount);
+      if (index < 0) return false;
+
+      //myList.RemoveAt(index);
+      throw null;
+      return true;
+    }
+
+    public void Clear()
+    {
+      if (myList != null)
+      {
+        if (myList.IsFrozen) ThrowResultObtained();
+
+        myList.ModifyVersion();
+        myList.Clear();
+        myCount = 0;
+      }
+    }
+
+    [Pure, NotNull]
+    public IList<T> ResultingList()
+    {
+      if (myList == null)
+      {
+        myList = FrozenEmpty;
+        return EmptyList<T>.Instance;
+      }
+
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      myList.Freeze(myCount);
+
+      return myCount == 0 ? EmptyList<T>.InstanceList : myList;
+    }
+
+    [Pure, NotNull]
+    public IReadOnlyList<T> ReadOnlyList()
+    {
+      if (myList == null)
+      {
+        myList = FrozenEmpty;
+        return EmptyList<T>.Instance;
+      }
+
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      myList.Freeze(myCount);
+
+      return myCount == 0 ? EmptyList<T>.ReadOnly : myList;
+    }
+
+    #region LINQ-like methods
+
+    [Pure]
+    public readonly bool Any()
+    {
+      if (myList == null) return false;
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      return myList.Count > 0;
     }
 
     [Pure]
     public readonly bool Any([InstantHandle, NotNull] Func<T, bool> predicate)
     {
-      for (var index = 0; index < myCount; index++)
+      if (myList == null) return false;
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      for (int index = 0, count = myList.Count; index < count; index++)
       {
-        if (predicate(myArray[index]))
+        if (predicate(myList.GetItemNoRangeCheck(index)))
           return true;
       }
 
@@ -150,47 +267,82 @@ namespace JetBrains.Util
     [Pure]
     public readonly T Last()
     {
-      if (myCount == 0) ThrowEmpty();
+      if (myList == null) ThrowEmpty();
+      if (myList.IsFrozen) ThrowResultObtained();
 
-      return myArray[myCount - 1];
+      var count = myList.Count;
+      if (count == 0) ThrowEmpty();
+
+      return myList.GetItemNoRangeCheck(count - 1);
     }
 
     [Pure]
     public readonly T First()
     {
-      if (myCount == 0) ThrowEmpty();
+      if (myList == null) ThrowEmpty();
+      if (myList.IsFrozen) ThrowResultObtained();
 
-      return myArray[0];
+      var count = myList.Count;
+      if (count == 0) ThrowEmpty();
+
+      return myList.GetItemNoRangeCheck(0);
     }
 
     [Pure]
     public readonly T Single()
     {
-      if (myCount == 0) ThrowEmpty();
-      if (myCount > 1) ThrowManyItems();
+      if (myList == null) ThrowEmpty();
+      if (myList.IsFrozen) ThrowResultObtained();
 
-      return myArray[0];
+      var count = myList.Count;
+      if (count == 0) ThrowEmpty();
+      if (count > 1) ThrowManyItems();
+
+      return myList.GetItemNoRangeCheck(0);
     }
 
-    [CanBeNull] public readonly T SingleItem => myCount == 1 ? myArray[0] : default;
+    [CanBeNull]
+    public readonly T SingleItem
+    {
+      get
+      {
+        if (myList != null)
+        {
+          if (myList.IsFrozen) ThrowResultObtained();
+
+          // we can avoid .Count check here, since all the list contain at least one slot
+          // and there is an invariant of storing `default` in unused data slots
+          return myList.GetItemNoRangeCheck(0);
+        }
+
+        return default;
+      }
+    }
 
     [Pure, CanBeNull]
     public readonly T FirstOrDefault()
     {
-      if (myCount == 0)
-        return default;
+      if (myList == null) return default;
+      if (myList.IsFrozen) ThrowResultObtained();
 
-      return myArray[0];
+      // note: intentionally no .Count checks
+      return myList.GetItemNoRangeCheck(0);
     }
 
     [Pure, CanBeNull]
     public readonly T LastOrDefault()
     {
-      if (myCount == 0)
+      if (myList == null) return default;
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      var count = Count;
+      if (count == 0)
         return default;
 
-      return myArray[myCount - 1];
+      return myList.GetItemNoRangeCheck(count - 1);
     }
+
+    #endregion
 
     public void AddRange<TSource>([NotNull] IEnumerable<TSource> items)
       where TSource : T
@@ -276,30 +428,6 @@ namespace JetBrains.Util
       myArray = newArray;
     }
 
-    public bool Remove(T item)
-    {
-      if (myVersion == -1) ThrowResultObtained();
-
-      if (myArray == null)
-        return false;
-
-      var index = IndexOf(item);
-      if (index < 0)
-        return false;
-
-      RemoveAt(index);
-      return true;
-    }
-
-    [Pure]
-    public bool Contains(T item)
-    {
-      if (myVersion == -1) ThrowResultObtained();
-
-      var index = IndexOf(item);
-      return index >= 0;
-    }
-
     [Pure, NotNull]
     public T[] ToArray()
     {
@@ -345,25 +473,13 @@ namespace JetBrains.Util
       Array.Copy(myArray, 0, array, arrayIndex, myCount);
     }
 
-    public void Clear()
-    {
-      myList?.ClearImpl();
-    }
 
-    [Pure]
-    public int IndexOf(T item)
-    {
-      if (myVersion == -1) ThrowResultObtained();
 
-      if (myArray == null)
-        return -1;
 
-      return Array.IndexOf(myArray, item, 0, myCount);
-    }
 
     public void InsertRange(int index, in LocalList2<T> items)
     {
-      InsertRange(index, LocalList2<T>.myArray, LocalList2<T>.myCount);
+      InsertRange(index, LocalList2<T>.myArray, myCount);
     }
 
     public void InsertRange<TSource>(int atIndex, [NotNull] TSource[] items, int startingFrom = 0, int length = -1)
@@ -490,95 +606,67 @@ namespace JetBrains.Util
     }
 
     [Pure]
-    public ElementEnumerator GetEnumerator()
+    public readonly ElementEnumerator GetEnumerator()
     {
-      // todo: throw results obtained?
-
-      return new ElementEnumerator(myList ?? FrozenEmpty);
-    }
-
-    [Pure, NotNull]
-    public IList<T> ResultingList()
-    {
-      if (myList == null)
+      if (myList != null)
       {
-        myList = FrozenEmpty;
-        return EmptyList<T>.Instance;
+        if (myList.IsFrozen) ThrowResultObtained();
+
+        return new ElementEnumerator(myList, myCount);
       }
 
-      return myList.Freeze();
+      return new ElementEnumerator(FrozenEmpty, 0);
     }
 
-    [Pure, NotNull]
-    public IReadOnlyList<T> ReadOnlyList()
-    {
-      if (myList == null)
-      {
-        myList = FrozenEmpty;
-        return EmptyList<T>.Instance;
-      }
-
-      return myList.Freeze();
-    }
-
-    public override string ToString()
+    public override readonly string ToString()
     {
       if (myList == null) return "[]";
 
-      //myList.Aggregate((a, x) =>
-      //{
-      //  if (a.Length > 0) a.Append(", ");
-      //  a.Append(x);
-      //}, new StringBuilder());
-
-
-
-      if (myArray == null) return "[]";
+      //if (myList.IsFrozen) ThrowResultObtained();
 
       var builder = new StringBuilder();
       builder.Append("[");
-      for (var index = 0; index < myArray.Length; index++)
-      {
-        builder.Append(myArray[index]);
 
-        if (index < myCount - 1)
+      for (var index = 0; index < myCount; index++)
+      {
+        builder.Append(myList.GetItemNoRangeCheck(index));
+
+        if (index > 0)
           builder.Append(", ");
       }
 
-      builder.Append("]");
-      return builder.ToString();
+      return builder.Append("]").ToString();
     }
 
-    private static FixedList.Builder<T> Empty = new FixedList.ListOf1<T>();
-    private static FixedList.Builder<T> FrozenEmpty = new FixedList.ListOf1<T> { CountAndIterationData = 0 };
+    private static FixedList.Builder<T> Empty = new FixedList.ListOf4<T>();
+    private static FixedList.Builder<T> FrozenEmpty = new FixedList.ListOf4<T> { CountAndIterationData = 0 };
 
-    [Serializable]
-    [StructLayout(LayoutKind.Auto)]
+    [Serializable, StructLayout(LayoutKind.Auto)]
     public struct ElementEnumerator
     {
       private readonly FixedList.Builder<T> myBuilder;
       private readonly int myVersion;
       private int myIndex, myCount;
 
-      internal ElementEnumerator([NotNull] FixedList.Builder<T> builder)
+      internal ElementEnumerator([NotNull] FixedList.Builder<T> builder, int count)
       {
         myBuilder = builder;
         myVersion = builder.Version;
-        myCount = builder.Count;
+        myCount = count;
         myIndex = -1;
       }
 
       public bool MoveNext()
       {
-        if (myVersion != myBuilder.Version)
-          ThrowCollectionModified();
+        if (myVersion != myBuilder.Version) ThrowCollectionModified();
 
         return ++myIndex < myCount;
       }
 
-      public readonly T Current => myBuilder.GetItemNoRangeCheck(myIndex);
+      public readonly ref T Current => ref myBuilder.GetItemNoRangeCheck(myIndex);
 
       [ContractAnnotation("=> halt")]
+      [MethodImpl(MethodImplOptions.NoInlining)]
       private static void ThrowCollectionModified()
       {
         throw new InvalidOperationException("Collection has been modified");
@@ -588,6 +676,7 @@ namespace JetBrains.Util
     // note: those methods extracted to avoid complex control flow in methods preventing inlining
 
     [ContractAnnotation("=> halt")]
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowOutOfRange()
     {
       // ReSharper disable once NotResolvedInText
@@ -596,18 +685,21 @@ namespace JetBrains.Util
     }
 
     [ContractAnnotation("=> halt")]
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowResultObtained()
     {
       throw new InvalidOperationException("Result has been already obtained from this list");
     }
 
     [ContractAnnotation("=> halt")]
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowEmpty()
     {
       throw new InvalidOperationException("No items in LocalList2");
     }
 
     [ContractAnnotation("=> halt")]
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowManyItems()
     {
       throw new InvalidOperationException("More than single item in LocalList2");

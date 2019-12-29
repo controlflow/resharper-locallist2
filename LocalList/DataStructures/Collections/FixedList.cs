@@ -2,6 +2,8 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading;
 using JetBrains.Annotations;
 
@@ -9,6 +11,7 @@ namespace JetBrains.Util.DataStructures.Collections
 {
   // todo: test enumeration/index access speed of T[] vs 8 fields
   // todo: Count problem!
+  // todo: reduce the amount of fields/dispatch?
 
   [PublicAPI]
   public static class FixedList
@@ -84,31 +87,33 @@ namespace JetBrains.Util.DataStructures.Collections
       }
     }
 
-    // todo: value-type public mutable enumerator
     [DebuggerTypeProxy(typeof(BuilderDebugView<>))]
     internal abstract class Builder<T> : IReadOnlyList<T>, IEnumerator<T>, IList<T>
     {
-      // [    15 bits    ] [1 bit] [        16 bits        ]
-      //         |            |                |
-      //         |            |                +-- version OR iteration data
-      //         |            |
-      //         |            +-- frozen or not (1 means frozen)
-      //         |
-      //         +-- items count, unsigned
+      // [ 1 bit ] [   15 bits   ]  [        16 bits        ]
+      //     |            |                     |
+      //     |            |                     +-- version OR iteration data
+      //     |            |                         = 0xFFFF - before enumeration
+      //     |            |                         = x < count - at x's element
+      //     |            |                         = count - enumeration ended
+      //     |            |
+      //     |            +-- items count, unsigned
+      //     |
+      //     +-- frozen (1) or not (0)
       //
       // note: this must be of `int` type to use `Interlocked.CompareExchange()`
       internal int CountAndIterationData;
 
-      protected bool IsFrozen => (CountAndIterationData & NotFrozenBit) == 0;
+      internal bool IsFrozen => CountAndIterationData >= 0;
 
-      public int ShortCount => (int) ((uint) CountAndIterationData >> CountShift);
+      public int ShortCount => (int) ((uint) CountAndIterationData << 1 >> CountShift + 1);
 
-      protected const int FrozenBitShift = 16;
-      protected const int CountShift = FrozenBitShift + 1;
+      protected const int FrozenBitShift = 31;
+      protected const int CountShift = 16;
 
-      protected const int NotFrozenBit = 1 << (CountShift - 1);
+      protected const int NotFrozenBit = 1 << FrozenBitShift;
 
-      protected const int MaxCount = (int) (uint.MaxValue >> CountShift);
+      protected const int MaxCount = (int) (uint.MaxValue >> (CountShift + 1));
 
       protected const int NotFrozenCount0 = NotFrozenBit;
       protected const int NotFrozenCount1 = (1 << CountShift) | NotFrozenBit;
@@ -116,21 +121,26 @@ namespace JetBrains.Util.DataStructures.Collections
       protected const int NotFrozenCount3 = (3 << CountShift) | NotFrozenBit;
       protected const int NotFrozenCount4 = (4 << CountShift) | NotFrozenBit;
       protected const int NotFrozenCount5 = (5 << CountShift) | NotFrozenBit;
+      protected const int NotFrozenCount6 = (6 << CountShift) | NotFrozenBit;
+      protected const int NotFrozenCount7 = (7 << CountShift) | NotFrozenBit;
+      protected const int NotFrozenCount8 = (8 << CountShift) | NotFrozenBit;
 
       // iterator/version data is stored in first 16 bits
       // but we include count there as well, because why not
-      // todo: possible store in short?
       public int Version => CountAndIterationData;
 
-      protected const int IteratorOrVersionMask = (1 << FrozenBitShift) - 1;
+      protected const int IteratorOrVersionMask = (1 << CountShift) - 1;
       protected const int VersionAndCountIncrement = (1 << CountShift) + 1;
 
-      // todo: clarify
-      protected const int ReadyForGetEnumerator = IteratorOrVersionMask;
+      protected const int BeforeGetEnumerator = IteratorOrVersionMask - 1;
+      protected const int BeforeFirstElement = IteratorOrVersionMask;
 
       protected Builder()
       {
-        CountAndIterationData = NotFrozenBit; // not frozen, count = 0, version = 0
+        // todo: do we need it?
+        // not frozen, count = 0, version = 0xFFFF
+        CountAndIterationData = NotFrozenBit | IteratorOrVersionMask;
+        //CountAndIterationData = NotFrozenBit;
       }
 
       protected Builder(int count)
@@ -138,7 +148,8 @@ namespace JetBrains.Util.DataStructures.Collections
         Debug.Assert(count > 0); // use 'EmptyList<T>.Instance' instead
         Debug.Assert(count <= MaxCount);
 
-        CountAndIterationData = (int) ((uint) count << CountShift) | ReadyForGetEnumerator; // frozen, count is set
+        // frozen, count is set, before GetEnumerator
+        CountAndIterationData = (int) ((uint) count << CountShift) | BeforeGetEnumerator;
       }
 
       public virtual int Count => ShortCount;
@@ -148,31 +159,30 @@ namespace JetBrains.Util.DataStructures.Collections
       [Pure]
       public abstract ref T GetItemNoRangeCheck(int index);
 
-      public abstract void Append(in T newItem, ref Builder<T> self);
+      public abstract void Append(in T newItem, int count, ref Builder<T> self);
 
-      [NotNull, Pure] public abstract Builder<T> Clone();
+      [NotNull, Pure]
+      public abstract Builder<T> Clone();
 
-      [CanBeNull] public abstract Builder<T> TrimExcess(bool clone);
+      [CanBeNull]
+      public abstract Builder<T> TrimExcess(bool clone);
 
       protected abstract void CopyToImpl([NotNull] T[] array, int arrayIndex);
 
-      internal struct BuilderEnumerator
-      {
-        // todo: version checking
-      }
-
       #region Frozen enumeration
 
-      public IEnumerator<T> GetEnumerator()
+      // todo: is this suitable for array-based impl? seems not, count can be too large
+      IEnumerator<T> IEnumerable<T>.GetEnumerator()
       {
         Debug.Assert(IsFrozen);
+        Debug.Assert(Count > 0);
 
-        var data = CountAndIterationData;
-        var count = Count; // virtual call
-        var expected = data | ReadyForGetEnumerator;
+        var data = CountAndIterationData & ~IteratorOrVersionMask;
+        var beforeGetEnumerator = data | BeforeGetEnumerator;
+        var beforeFirstElement = data | BeforeFirstElement;
 
-        if (expected == Interlocked.CompareExchange(
-              location1: ref CountAndIterationData, value: data | count, comparand: expected))
+        if (beforeGetEnumerator == Interlocked.CompareExchange(
+              location1: ref CountAndIterationData, value: beforeFirstElement, comparand: beforeGetEnumerator))
         {
           return this;
         }
@@ -180,7 +190,7 @@ namespace JetBrains.Util.DataStructures.Collections
         return new Enumerator(this);
       }
 
-      IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+      IEnumerator IEnumerable.GetEnumerator() => ((IEnumerable<T>) this).GetEnumerator();
 
       private sealed class Enumerator : IEnumerator<T>
       {
@@ -196,7 +206,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
         public bool MoveNext()
         {
-          var nextIndex = myIndex + 1;
+          var nextIndex = ++myIndex;
           if (nextIndex < myBuilder.ShortCount)
           {
             myIndex = nextIndex;
@@ -217,22 +227,23 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         Debug.Assert(IsFrozen);
 
-        var newData = CountAndIterationData - 1;
-        if (newData < 0) return false;
+        var newIterator = (CountAndIterationData + 1) & IteratorOrVersionMask;
+        if (newIterator == (newIterator >> CountShift)) return false;
 
-        CountAndIterationData = newData;
+        CountAndIterationData = CountAndIterationData & ~IteratorOrVersionMask | newIterator;
         return true;
       }
 
       void IDisposable.Dispose()
       {
         Interlocked.Exchange(
-          ref CountAndIterationData, value: CountAndIterationData | ReadyForGetEnumerator);
+          location1: ref CountAndIterationData,
+          value: CountAndIterationData & ~IteratorOrVersionMask | BeforeGetEnumerator);
       }
 
       void IEnumerator.Reset()
       {
-        CountAndIterationData |= ~IteratorOrVersionMask;
+        CountAndIterationData = CountAndIterationData & ~IteratorOrVersionMask | BeforeFirstElement;
       }
 
       public abstract T Current { get; }
@@ -241,15 +252,23 @@ namespace JetBrains.Util.DataStructures.Collections
       #endregion
       #region Read access
 
-      public abstract T this[int index]
+      public abstract T this[int index] { get; set; }
+
+      public virtual void SetValue(int index, in T value)
       {
-        get;
-        set; // todo: modify version
+        if (IsFrozen) ThrowResultObtained();
+        if ((uint) index >= (uint) ShortCount) ThrowOutOfRange();
+
+        GetItemNoRangeCheck(index) = value;
+        CountAndIterationData = (CountAndIterationData + 1) & ~NotFrozenBit;
       }
 
-      // todo: make use of .Count in both of those methods
-      public abstract int IndexOf(T item);
-      public bool Contains(T item) => IndexOf(item) >= 0;
+      int IList<T>.IndexOf(T item) => IndexOf(item, ShortCount);
+
+      [Pure]
+      public abstract int IndexOf(T item, int count);
+
+      public bool Contains(T item) => IndexOf(item, Count) >= 0;
 
       public void CopyTo(T[] array, int arrayIndex)
       {
@@ -277,6 +296,7 @@ namespace JetBrains.Util.DataStructures.Collections
       #endregion
 
       [ContractAnnotation("=> halt")]
+      [MethodImpl(MethodImplOptions.NoInlining)]
       protected static void ThrowOutOfRange()
       {
         // ReSharper disable once NotResolvedInText
@@ -284,14 +304,38 @@ namespace JetBrains.Util.DataStructures.Collections
       }
 
       [ContractAnnotation("=> halt")]
-      protected static void ThrowFrozen()
+      [MethodImpl(MethodImplOptions.NoInlining)]
+      protected static void ThrowResultObtained()
       {
-        throw new CollectionReadOnlyException();
+        throw new InvalidOperationException("Result has been already obtained from this list");
       }
 
       public sealed override string ToString()
       {
-        return $"{nameof(FixedList)}(Count = {ShortCount.ToString()})";
+        var builder = new StringBuilder();
+        var state = CountAndIterationData & IteratorOrVersionMask;
+
+        builder.Append(IsFrozen ? "FixedList(" : "Builder(");
+        builder.Append("Count = ").Append(Count);
+
+        if (IsFrozen)
+        {
+          if (state != BeforeGetEnumerator)
+          {
+            builder.Append(", Enumeration = ");
+
+            if (state == BeforeFirstElement)
+              builder.Append("<before item 0>");
+            else
+              builder.Append("<at item ").Append(state).Append('>');
+          }
+        }
+        else
+        {
+          builder.Append(", Version = 0x").Append(state.ToString("X4"));
+        }
+
+        return builder.Append(')').ToString();
       }
 
       public bool AllFreeSlotsAreClear()
@@ -305,21 +349,16 @@ namespace JetBrains.Util.DataStructures.Collections
         return true;
       }
 
-      public abstract void ClearImpl();
+      public abstract void Clear();
 
       public void ModifyVersion()
       {
-        Debug.Assert(!IsFrozen);
-        CountAndIterationData++;
+        CountAndIterationData = (CountAndIterationData + 1) | NotFrozenBit;
       }
 
-      [NotNull]
-      public Builder<T> Freeze()
+      public virtual void Freeze(int count)
       {
-        if (IsFrozen) ThrowFrozen();
-
-        CountAndIterationData &= ~NotFrozenBit;
-        return this;
+        CountAndIterationData = count | BeforeGetEnumerator;
       }
     }
 
@@ -338,29 +377,22 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         get
         {
-          if ((uint) index >= (uint) ShortCount) ThrowOutOfRange();
+          if ((uint) index > (uint) ShortCount) ThrowOutOfRange();
 
           return Item0;
         }
-        set
-        {
-          if (IsFrozen) ThrowFrozen();
-          if ((uint) index >= ShortCount) ThrowOutOfRange();
-
-          Item0 = value;
-        }
+        set => throw new CollectionReadOnlyException();
       }
 
       public override int Capacity => 1;
 
       public override ref T GetItemNoRangeCheck(int index) => ref Item0;
 
-      public override void Append(in T newItem, ref Builder<T> self)
+      public override void Append(in T newItem, int count, ref Builder<T> self)
       {
         Debug.Assert(!IsFrozen);
 
-        var newData = CountAndIterationData += VersionAndCountIncrement;
-        if (newData >> CountShift == 1)
+        if (count == 0)
         {
           Item0 = newItem;
         }
@@ -368,7 +400,7 @@ namespace JetBrains.Util.DataStructures.Collections
         {
           self = new ListOf4<T>
           {
-            CountAndIterationData = NotFrozenCount2,
+            CountAndIterationData = CountAndIterationData,
             Item0 = Item0,
             Item1 = newItem
           };
@@ -377,7 +409,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> Clone()
       {
-        Debug.Assert(!IsFrozen); // there should be no need to clone the immutable data
+        if (IsFrozen) ThrowResultObtained();
 
         return new ListOf1<T>
         {
@@ -388,7 +420,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> TrimExcess(bool clone)
       {
-        Debug.Assert(!IsFrozen); // mutable operation
+        if (IsFrozen) ThrowResultObtained();
 
         if (ShortCount == 0) return null;
 
@@ -397,18 +429,20 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override T Current => Item0;
 
-      public override int IndexOf(T item)
+      public override int IndexOf(T item, int count)
       {
-        if (ShortCount == 1 && EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
+        if (count == 1)
+        {
+          if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
+        }
 
         return -1;
       }
 
-      public override void ClearImpl()
+      public override void Clear()
       {
-        if (IsFrozen) ThrowFrozen();
+        Debug.Assert(!IsFrozen);
 
-        CountAndIterationData = NotFrozenCount0 | ((CountAndIterationData & IteratorOrVersionMask) + 1);
         Item0 = default;
       }
 
@@ -438,16 +472,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
           return index == 0 ? Item0 : Item1;
         }
-        set
-        {
-          if (IsFrozen) ThrowFrozen();
-          if ((uint) index >= ShortCount) ThrowOutOfRange();
-
-          if (index == 0)
-            Item0 = value;
-          else
-            Item1 = value;
-        }
+        set => throw new CollectionReadOnlyException();
       }
 
       public override int Capacity => 2;
@@ -457,25 +482,24 @@ namespace JetBrains.Util.DataStructures.Collections
         return ref index == 0 ? ref Item0 : ref Item1;
       }
 
-      public override void Append(in T newItem, ref Builder<T> self)
+      public override void Append(in T newItem, int count, ref Builder<T> self)
       {
         Debug.Assert(!IsFrozen);
 
-        var newData = CountAndIterationData += VersionAndCountIncrement;
-
-        switch (newData >> CountShift)
+        switch (count)
         {
-          case 1: Item0 = newItem; break;
-          case 2: Item1 = newItem; break;
-          default: self = Resize(newItem); break;
+          case 0: Item0 = newItem; break;
+          case 1: Item1 = newItem; break;
+          default: self = Enlarge(newItem); break;
         }
       }
 
-      private Builder<T> Resize(in T newItem)
+      [Pure]
+      private Builder<T> Enlarge(in T newItem)
       {
         return new ListOf4<T>
         {
-          CountAndIterationData = NotFrozenCount3,
+          CountAndIterationData = CountAndIterationData,
           Item0 = Item0,
           Item1 = Item1,
           Item2 = newItem
@@ -484,7 +508,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> Clone()
       {
-        Debug.Assert(!IsFrozen);
+        if (IsFrozen) ThrowResultObtained();
 
         return new ListOf2<T>
         {
@@ -496,7 +520,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> TrimExcess(bool clone)
       {
-        Debug.Assert(!IsFrozen);
+        if (IsFrozen) ThrowResultObtained();
 
         switch (ShortCount)
         {
@@ -515,9 +539,8 @@ namespace JetBrains.Util.DataStructures.Collections
         }
       }
 
-      public override int IndexOf(T item)
+      public override int IndexOf(T item, int count)
       {
-        var count = ShortCount;
         if (count > 0)
         {
           if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
@@ -531,11 +554,10 @@ namespace JetBrains.Util.DataStructures.Collections
         return -1;
       }
 
-      public override void ClearImpl()
+      public override void Clear()
       {
-        if (IsFrozen) ThrowFrozen();
+        Debug.Assert(!IsFrozen);
 
-        CountAndIterationData = NotFrozenCount0 | ((CountAndIterationData & IteratorOrVersionMask) + 1);
         Item0 = default;
         Item1 = default;
       }
@@ -572,27 +594,11 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         get
         {
-          if ((uint) index > (uint) ShortCount) ThrowOutOfRange();
+          if ((uint) index >= (uint) ShortCount) ThrowOutOfRange();
 
-          switch (index)
-          {
-            case 0: return Item0;
-            case 1: return Item1;
-            default: return Item2;
-          }
+          return GetItemNoRangeCheck(index);
         }
-        set
-        {
-          if (IsFrozen) ThrowFrozen();
-          if ((uint) index >= ShortCount) ThrowOutOfRange();
-
-          switch (index)
-          {
-            case 0: Item0 = value; break;
-            case 1: Item1 = value; break;
-            default: Item2 = value; break;
-          }
-        }
+        set => throw new CollectionReadOnlyException();
       }
 
       public override int Capacity => 3;
@@ -607,26 +613,25 @@ namespace JetBrains.Util.DataStructures.Collections
         }
       }
 
-      public override void Append(in T newItem, ref Builder<T> self)
+      public override void Append(in T newItem, int count, ref Builder<T> self)
       {
         Debug.Assert(!IsFrozen);
 
-        var newData = CountAndIterationData += VersionAndCountIncrement;
-
-        switch (newData >> CountShift)
+        switch (count)
         {
-          case 1: Item0 = newItem; break;
-          case 2: Item1 = newItem; break;
-          case 3: Item2 = newItem; break;
-          default: self = Resize(newItem); break;
+          case 0: Item0 = newItem; break;
+          case 1: Item1 = newItem; break;
+          case 2: Item2 = newItem; break;
+          default: self = Enlarge(newItem); break;
         }
       }
 
-      private Builder<T> Resize(in T newItem)
+      [Pure]
+      private Builder<T> Enlarge(in T newItem)
       {
         return new ListOf8<T>
         {
-          CountAndIterationData = NotFrozenCount4,
+          CountAndIterationData = CountAndIterationData,
           Item0 = Item0,
           Item1 = Item1,
           Item2 = Item2,
@@ -636,7 +641,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> Clone()
       {
-        Debug.Assert(!IsFrozen);
+        if (IsFrozen) ThrowResultObtained();
 
         return new ListOf3<T>
         {
@@ -649,7 +654,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> TrimExcess(bool clone)
       {
-        Debug.Assert(!IsFrozen);
+        if (IsFrozen) ThrowResultObtained();
 
         switch (ShortCount)
         {
@@ -682,16 +687,15 @@ namespace JetBrains.Util.DataStructures.Collections
         {
           switch (CountAndIterationData & IteratorOrVersionMask)
           {
-            case 0: return Item2;
+            case 0: return Item0;
             case 1: return Item1;
-            default: return Item0;
+            default: return Item2;
           }
         }
       }
 
-      public override int IndexOf(T item)
+      public override int IndexOf(T item, int count)
       {
-        var count = ShortCount;
         if (count > 0)
         {
           if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
@@ -710,11 +714,10 @@ namespace JetBrains.Util.DataStructures.Collections
         return -1;
       }
 
-      public override void ClearImpl()
+      public override void Clear()
       {
-        if (IsFrozen) ThrowFrozen();
+        Debug.Assert(!IsFrozen);
 
-        CountAndIterationData = NotFrozenCount0 | ((CountAndIterationData & IteratorOrVersionMask) + 1);
         Item0 = default;
         Item1 = default;
         Item2 = default;
@@ -764,7 +767,7 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         get
         {
-          if ((uint) index > (uint) ShortCount) ThrowOutOfRange();
+          if ((uint) index >= (uint) ShortCount) ThrowOutOfRange();
 
           switch (index)
           {
@@ -774,13 +777,7 @@ namespace JetBrains.Util.DataStructures.Collections
             default: return Item3;
           }
         }
-        set
-        {
-          if (IsFrozen) ThrowFrozen();
-          if ((uint) index >= ShortCount) ThrowOutOfRange();
-
-          GetItemNoRangeCheck(index) = value;
-        }
+        set => throw new CollectionReadOnlyException();
       }
 
       public override int Capacity => 4;
@@ -796,26 +793,26 @@ namespace JetBrains.Util.DataStructures.Collections
         }
       }
 
-      public override void Append(in T newItem, ref Builder<T> self)
+      public override void Append(in T newItem, int count, ref Builder<T> self)
       {
         Debug.Assert(!IsFrozen);
 
-        var newData = CountAndIterationData += VersionAndCountIncrement;
-        switch (newData >> CountShift)
+        switch (count)
         {
-          case 1: Item0 = newItem; break;
-          case 2: Item1 = newItem; break;
-          case 3: Item2 = newItem; break;
-          case 4: Item3 = newItem; break;
-          default: self = Resize(newItem); break;
+          case 0: Item0 = newItem; break;
+          case 1: Item1 = newItem; break;
+          case 2: Item2 = newItem; break;
+          case 3: Item3 = newItem; break;
+          default: self = Enlarge(newItem); break;
         }
       }
 
-      private Builder<T> Resize(in T newItem)
+      [Pure]
+      private Builder<T> Enlarge(in T newItem)
       {
         return new ListOf8<T>
         {
-          CountAndIterationData = NotFrozenCount5,
+          CountAndIterationData = CountAndIterationData,
           Item0 = Item0,
           Item1 = Item1,
           Item2 = Item2,
@@ -826,7 +823,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> Clone()
       {
-        Debug.Assert(!IsFrozen);
+        if (IsFrozen) ThrowResultObtained();
 
         return new ListOf4<T>
         {
@@ -840,7 +837,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> TrimExcess(bool clone)
       {
-        Debug.Assert(!IsFrozen);
+        if (IsFrozen) ThrowResultObtained();
 
         switch (ShortCount)
         {
@@ -882,17 +879,16 @@ namespace JetBrains.Util.DataStructures.Collections
         {
           switch (CountAndIterationData & IteratorOrVersionMask)
           {
-            case 3: return Item0;
-            case 2: return Item1;
-            case 1: return Item2;
+            case 0: return Item0;
+            case 1: return Item1;
+            case 2: return Item2;
             default: return Item3;
           }
         }
       }
 
-      public override int IndexOf(T item)
+      public override int IndexOf(T item, int count)
       {
-        var count = ShortCount;
         if (count > 0)
         {
           if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
@@ -916,11 +912,10 @@ namespace JetBrains.Util.DataStructures.Collections
         return -1;
       }
 
-      public override void ClearImpl()
+      public override void Clear()
       {
-        if (IsFrozen) ThrowFrozen();
+        Debug.Assert(!IsFrozen);
 
-        CountAndIterationData = NotFrozenCount0 | ((CountAndIterationData & IteratorOrVersionMask) + 1);
         Item0 = default;
         Item1 = default;
         Item2 = default;
@@ -962,7 +957,7 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         get
         {
-          if ((uint) index > (uint) ShortCount) ThrowOutOfRange();
+          if ((uint) index >= (uint) ShortCount) ThrowOutOfRange();
 
           switch (index)
           {
@@ -976,13 +971,7 @@ namespace JetBrains.Util.DataStructures.Collections
             default: return Item7;
           }
         }
-        set
-        {
-          if (IsFrozen) ThrowFrozen();
-          if ((uint) index >= ShortCount) ThrowOutOfRange();
-
-          GetItemNoRangeCheck(index) = value;
-        }
+        set => throw new CollectionReadOnlyException();
       }
 
       public override int Capacity => 8;
@@ -1002,29 +991,28 @@ namespace JetBrains.Util.DataStructures.Collections
         }
       }
 
-      public override void Append(in T newItem, ref Builder<T> self)
+      public override void Append(in T newItem, int count, ref Builder<T> self)
       {
         Debug.Assert(!IsFrozen);
 
-        var newData = CountAndIterationData += VersionAndCountIncrement;
-
-        switch (newData >> CountShift)
+        switch (count)
         {
-          case 1: Item0 = newItem; break;
-          case 2: Item1 = newItem; break;
-          case 3: Item2 = newItem; break;
-          case 4: Item3 = newItem; break;
-          case 5: Item4 = newItem; break;
-          case 6: Item5 = newItem; break;
-          case 7: Item6 = newItem; break;
-          case 8: Item7 = newItem; break;
+          case 0: Item0 = newItem; break;
+          case 1: Item1 = newItem; break;
+          case 2: Item2 = newItem; break;
+          case 3: Item3 = newItem; break;
+          case 4: Item4 = newItem; break;
+          case 5: Item5 = newItem; break;
+          case 6: Item6 = newItem; break;
+          case 7: Item7 = newItem; break;
           default: self = Resize(in newItem); break;
         }
       }
 
+      [Pure, NotNull]
       private Builder<T> Resize(in T item)
       {
-        var array = new T[16];
+        var array = new T[Capacity * 2];
         array[0] = Item0;
         array[1] = Item1;
         array[2] = Item2;
@@ -1034,11 +1022,16 @@ namespace JetBrains.Util.DataStructures.Collections
         array[6] = Item6;
         array[7] = Item7;
         array[8] = item;
-        return new ListOfArray<T>(array, count: 9);
+
+        var result = new ListOfArray<T>(array, count: 9);
+        result.CountAndIterationData |= NotFrozenBit; // unfreeze
+        return result;
       }
 
       public override Builder<T> Clone()
       {
+        if (IsFrozen) ThrowResultObtained();
+
         return new ListOf8<T>
         {
           CountAndIterationData = CountAndIterationData,
@@ -1055,7 +1048,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> TrimExcess(bool clone)
       {
-        Debug.Assert(!IsFrozen);
+        if (IsFrozen) ThrowResultObtained();
 
         switch (ShortCount)
         {
@@ -1113,21 +1106,20 @@ namespace JetBrains.Util.DataStructures.Collections
         {
           switch (CountAndIterationData & IteratorOrVersionMask)
           {
-            case 7: return Item0;
-            case 6: return Item1;
-            case 5: return Item2;
-            case 4: return Item3;
-            case 3: return Item4;
-            case 2: return Item5;
-            case 1: return Item6;
+            case 0: return Item0;
+            case 1: return Item1;
+            case 2: return Item2;
+            case 3: return Item3;
+            case 4: return Item4;
+            case 5: return Item5;
+            case 6: return Item6;
             default: return Item7;
           }
         }
       }
 
-      public override int IndexOf(T item)
+      public override int IndexOf(T item, int count)
       {
-        var count = ShortCount;
         if (count > 0)
         {
           if (EqualityComparer<T>.Default.Equals(item, Item0)) return 0;
@@ -1171,11 +1163,10 @@ namespace JetBrains.Util.DataStructures.Collections
         return -1;
       }
 
-      public override void ClearImpl()
+      public override void Clear()
       {
-        if (IsFrozen) ThrowFrozen();
+        Debug.Assert(!IsFrozen);
 
-        CountAndIterationData = NotFrozenCount0 | ((CountAndIterationData & IteratorOrVersionMask) + 1);
         Item0 = default;
         Item1 = default;
         Item2 = default;
@@ -1236,10 +1227,19 @@ namespace JetBrains.Util.DataStructures.Collections
       [NotNull] private T[] myArray;
       private int myCount; // use this instead of myCountAndVersionData
 
+      public ListOfArray(int capacity)
+      {
+        CountAndIterationData = NotFrozenCount0;
+        myArray = new T[capacity];
+      }
+
       public ListOfArray([NotNull] T[] array, int count)
       {
         Debug.Assert(array != null);
+        Debug.Assert(array.Length > 0);
 
+        // todo: nope
+        CountAndIterationData = BeforeGetEnumerator; // frozen
         myArray = array;
         myCount = count;
       }
@@ -1250,31 +1250,35 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override ref T GetItemNoRangeCheck(int index) => ref myArray[index];
 
-      public override void Append(in T newItem, ref Builder<T> self)
+      public override void Append(in T newItem, int count, ref Builder<T> self)
       {
-        if (myCount == myArray.Length)
+        Debug.Assert(!IsFrozen);
+
+        if (count == myArray.Length)
         {
-          var newArray = new T[myCount * 2];
-          Array.Copy(myArray, 0, newArray, 0, myCount);
+          var newArray = new T[count * 2];
+          Array.Copy(myArray, 0, newArray, 0, count);
           myArray = newArray;
         }
 
-        myArray[myCount++] = newItem;
-        CountAndIterationData++;
+        myArray[count] = newItem;
       }
 
       public override Builder<T> Clone()
       {
-        Debug.Assert(!IsFrozen);
+        if (IsFrozen) ThrowResultObtained();
 
         var newArray = new T[myArray.Length];
         Array.Copy(myArray, newArray, myCount);
-        return new ListOfArray<T>(newArray, myCount);
+
+        var result = new ListOfArray<T>(newArray, myCount);
+        result.CountAndIterationData |= NotFrozenBit; // unfreeze
+        return result;
       }
 
       public override Builder<T> TrimExcess(bool clone)
       {
-        Debug.Assert(!IsFrozen);
+        if (IsFrozen) ThrowResultObtained();
 
         if (clone && myCount == myArray.Length)
         {
@@ -1323,27 +1327,26 @@ namespace JetBrains.Util.DataStructures.Collections
           default:
             return clone ? Clone() : this;
         }
-
-
-        var newArray = new T[myArray.Length];
-        Array.Copy(myArray, newArray, myCount);
-        return new ListOfArray<T>(newArray, myCount);
       }
 
-      public override T Current => myArray[myCount - CountAndIterationData];
+      public override T Current => myArray[CountAndIterationData];
 
-      public override int IndexOf(T item)
+      public override int IndexOf(T item, int count)
       {
-        throw new NotImplementedException();
+        return Array.IndexOf(myArray, item, startIndex: 0, count: count);
       }
 
-      public override void ClearImpl()
+      public override void Clear()
       {
-        if (IsFrozen) ThrowFrozen();
+        Debug.Assert(!IsFrozen);
 
         Array.Clear(myArray, index: 0, length: myCount);
-        myCount = 0;
-        CountAndIterationData++;
+      }
+
+      public override void Freeze(int count)
+      {
+        myCount = count;
+        CountAndIterationData = BeforeGetEnumerator; // todo: FIX this
       }
 
       protected override void CopyToImpl(T[] array, int arrayIndex)
@@ -1355,17 +1358,13 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         get
         {
+          Debug.Assert(IsFrozen);
+
           if ((uint) index >= (uint) myCount) ThrowOutOfRange();
 
           return myArray[index];
         }
-        set
-        {
-          if ((uint) index >= (uint) myCount) ThrowOutOfRange();
-          if (IsFrozen) ThrowFrozen();
-
-          myArray[index] = value;
-        }
+        set => throw new CollectionReadOnlyException();
       }
     }
 
