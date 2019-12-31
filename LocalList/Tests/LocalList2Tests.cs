@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using JetBrains.Annotations;
@@ -177,7 +178,7 @@ namespace JetBrains.Util.Tests
       foreach (var list in CreateVariousFilledLocalLists())
       {
         Console.WriteLine($"count={list.Count}, capacity={list.Capacity}");
-        if (list.Count != 1 || list.Capacity != 4) continue;
+        if (list.Count != 9 || list.Capacity != 16) continue;
 
         var enumerator1 = list.GetEnumerator();
 
@@ -196,8 +197,8 @@ namespace JetBrains.Util.Tests
 
         Assert.Throws<InvalidOperationException>(() => _ = list.GetEnumerator());
 
-        using var enumerator2 = resultingList.GetEnumerator(); // reused `this`
-        using var enumerator3 = resultingList.GetEnumerator(); // not reused one
+        var enumerator2 = resultingList.GetEnumerator(); // reused `this`
+        var enumerator3 = resultingList.GetEnumerator(); // not reused one
 
         if (list.Count == 0)
         {
@@ -210,21 +211,42 @@ namespace JetBrains.Util.Tests
           Assert.IsFalse(ReferenceEquals(enumerator2, enumerator3));
         }
 
-        for (var index = 1; index <= list.Count; index++)
+        AssertItemsInOrder(enumerator2);
+        AssertItemsInOrder(enumerator3);
+
+        enumerator2.Dispose();
+
+        var enumerator4 = ((IEnumerable) resultingList).GetEnumerator(); // reused
+        Assert.IsTrue(ReferenceEquals(enumerator2, enumerator4));
+        Assert.IsTrue(ReferenceEquals(resultingList, enumerator4));
+
+        AssertItemsInOrder((IEnumerator<int>) enumerator4);
+
+        enumerator3.Dispose();
+
+        void AssertItemsInOrder(IEnumerator<int> enumerator)
         {
-          Assert.IsTrue(enumerator2.MoveNext());
-          Assert.AreEqual(index, enumerator2.Current);
+          IEnumerator oldEnumerator = enumerator;
+
+          for (var index = 1; index <= list.Count; index++)
+          {
+            Assert.IsTrue(enumerator.MoveNext());
+            Assert.AreEqual(index, enumerator.Current);
+            Assert.AreEqual(index, oldEnumerator.Current);
+          }
+
+          Assert.IsFalse(enumerator.MoveNext());
+
+          enumerator.Reset();
+
+          for (var index = 1; index <= list.Count; index++)
+          {
+            Assert.IsTrue(enumerator.MoveNext());
+            Assert.AreEqual(index, enumerator.Current);
+          }
+
+          Assert.IsFalse(enumerator.MoveNext());
         }
-
-        Assert.IsFalse(enumerator2.MoveNext());
-
-        for (var index = 1; index <= list.Count; index++)
-        {
-          Assert.IsTrue(enumerator3.MoveNext());
-          Assert.AreEqual(index, enumerator3.Current);
-        }
-
-        Assert.IsFalse(enumerator3.MoveNext());
       }
     }
 
@@ -291,6 +313,7 @@ namespace JetBrains.Util.Tests
         for (var count = 0; count <= capacity + 1; count++)
         {
           var list = new LocalList2<int>(capacity);
+          if (list.Capacity != capacity) continue;
 
           for (var i = 1; i <= count; i++) list.Add(i);
 

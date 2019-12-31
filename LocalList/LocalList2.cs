@@ -655,14 +655,14 @@ namespace JetBrains.Util
       internal ElementEnumerator([NotNull] FixedList.Builder<T> builder, int count)
       {
         myBuilder = builder;
-        myVersion = builder.Version;
+        myVersion = builder.CountAndIterationData;
         myCount = count;
         myIndex = -1;
       }
 
       public bool MoveNext()
       {
-        if (myVersion != myBuilder.Version) ThrowCollectionModified();
+        if (myVersion != myBuilder.CountAndIterationData) ThrowCollectionModified();
 
         return ++myIndex < myCount;
       }
