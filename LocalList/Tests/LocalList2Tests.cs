@@ -16,6 +16,10 @@ namespace JetBrains.Util.Tests
   [TestFixture]
   public sealed class LocalList2Tests
   {
+    // for debugging:
+    //Console.WriteLine($"count={list.Count}, capacity={list.Capacity}");
+    //if (list.Count != 0 || list.Capacity != 1) continue;
+
     [Test]
     public void DefaultConstructor()
     {
@@ -54,9 +58,6 @@ namespace JetBrains.Util.Tests
     {
       foreach (var list in CreateVariousFilledLocalLists())
       {
-        //Console.WriteLine($"count={list.Count}, capacity={list.Capacity}");
-        //if (list.Count != 0 || list.Capacity != 1) continue;
-
         var sameCapacityClone = new LocalList2<int>(in list, preserveCapacity: true);
 
         Assert.AreEqual(list.Count, sameCapacityClone.Count);
@@ -106,7 +107,11 @@ namespace JetBrains.Util.Tests
         Assert.AreEqual(0, list.Count);
 
         var bytes = NonZeroBytes(count).ToArray();
-        foreach (var x in bytes) list.Add(x);
+
+        foreach (var x in bytes)
+        {
+          list.Add(x);
+        }
 
         Assert.AreEqual(count, list.Count);
         Assert.IsTrue(list.AllFreeSlotsAreClear());
@@ -115,9 +120,6 @@ namespace JetBrains.Util.Tests
         {
           Assert.AreEqual(bytes[index], list[index]);
         }
-
-        //Console.WriteLine($"count={list.Count}, capacity={list.Capacity}");
-        //if (list.Count != 1 || list.Capacity != 4) continue;
 
         Assert.Throws<ArgumentOutOfRangeException>(() => _ = list[-1]);
         Assert.Throws<ArgumentOutOfRangeException>(() => _ = list[list.Count]);
@@ -155,7 +157,7 @@ namespace JetBrains.Util.Tests
     }
 
     [Test]
-    public void MutableStructEnumerator01()
+    public void Enumeration01()
     {
       foreach (var capacity in CapacitiesToTest)
       {
@@ -164,22 +166,22 @@ namespace JetBrains.Util.Tests
         list.Add("def");
 
         var enumerator = list.GetEnumerator();
+
         Assert.IsTrue(enumerator.MoveNext());
         Assert.AreEqual("abc", enumerator.Current);
+
         Assert.IsTrue(enumerator.MoveNext());
         Assert.AreEqual("def", enumerator.Current);
+
         Assert.IsFalse(enumerator.MoveNext());
       }
     }
 
     [Test]
-    public void MutableStructEnumerator02()
+    public void Enumeration02()
     {
       foreach (var list in CreateVariousFilledLocalLists())
       {
-        //Console.WriteLine($"count={list.Count}, capacity={list.Capacity}");
-        //if (list.Count != 9 || list.Capacity != 16) continue;
-
         var enumerator1 = list.GetEnumerator();
 
         for (var index = 1; index <= list.Count; index++)
@@ -196,6 +198,8 @@ namespace JetBrains.Util.Tests
           Assert.IsTrue(ReferenceEquals(resultingList, EmptyList<int>.Instance));
 
         Assert.Throws<InvalidOperationException>(() => _ = list.GetEnumerator());
+        Assert.Throws<InvalidOperationException>(() => _ = list.ResultingList());
+        Assert.Throws<InvalidOperationException>(() => _ = list.ReadOnlyList());
 
         var enumerator2 = resultingList.GetEnumerator(); // reused `this`
         var enumerator3 = resultingList.GetEnumerator(); // not reused one
@@ -254,7 +258,7 @@ namespace JetBrains.Util.Tests
     }
 
     [Test]
-    public void MutableStructEnumerator03()
+    public void Enumeration03()
     {
       foreach (var list in CreateVariousFilledLocalLists())
       {
@@ -281,9 +285,6 @@ namespace JetBrains.Util.Tests
         var oldCapacity = list.Capacity;
         var enumerator = list.GetEnumerator();
 
-        //Console.WriteLine($"count={list.Count}, capacity={list.Capacity}");
-        //if (list.Count != 1 || list.Capacity != 9) continue;
-
         list.Clear();
 
         Assert.AreEqual(0, list.Count);
@@ -304,6 +305,47 @@ namespace JetBrains.Util.Tests
       }
     }
 
+    [Test]
+    public void IndexOfContains()
+    {
+      var random = new Random();
+
+      foreach (var list in CreateVariousFilledLocalLists())
+      {
+        Assert.AreEqual(list.IndexOf(0), -1);
+        Assert.IsFalse(list.Contains(0));
+
+        if (list.Count > 0)
+        {
+          var valueToFind = random.Next(0, list.Count) + 1;
+          var foundIndex = list.IndexOf(valueToFind);
+
+          Assert.AreEqual(foundIndex, valueToFind - 1);
+          Assert.IsTrue(list.Contains(valueToFind));
+        }
+
+        // the same over IList<T>
+        var resultingList = list.ResultingList();
+
+        Assert.AreEqual(resultingList.IndexOf(0), -1);
+        Assert.IsFalse(resultingList.Contains(0));
+
+        Assert.Throws<InvalidOperationException>(() => _ = list.IndexOf(0));
+        Assert.Throws<InvalidOperationException>(() => _ = list.Contains(0));
+
+        if (list.Count > 0)
+        {
+          var valueToFind = random.Next(0, list.Count) + 1;
+          var foundIndex = resultingList.IndexOf(valueToFind);
+
+          Assert.AreEqual(foundIndex, valueToFind - 1);
+          Assert.IsTrue(resultingList.Contains(valueToFind));
+        }
+      }
+    }
+
+    #region Test helpers
+
     [NotNull] private static readonly int[] CapacitiesToTest =
     {
       0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 15, 16, 24
@@ -318,7 +360,10 @@ namespace JetBrains.Util.Tests
           var list = new LocalList2<int>(capacity);
           if (list.Capacity != capacity) continue;
 
-          for (var i = 1; i <= count; i++) list.Add(i);
+          for (var index = 1; index <= count; index++)
+          {
+            list.Add(index);
+          }
 
           yield return list;
         }
@@ -326,6 +371,20 @@ namespace JetBrains.Util.Tests
 
       // some special cases
       yield return new LocalList2<int>(capacity: 1, forceUseArray: true);
+
+
+      var largeCapacity = ushort.MaxValue * 2;
+      yield return new LocalList2<int>(largeCapacity);
+
+      var largeList2 = new LocalList2<int>(largeCapacity);
+      for (var index = 1; index <= largeList2.Capacity / 2; index++)
+      {
+        largeList2.Add(index);
+      }
+
+      yield return largeList2;
     }
+
+    #endregion
   }
 }

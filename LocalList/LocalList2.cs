@@ -93,6 +93,8 @@ namespace JetBrains.Util
       }
     }
 
+    // todo:
+
     public LocalList2([NotNull] IEnumerable<T> enumerable)
     {
       myList = null;
@@ -184,6 +186,8 @@ namespace JetBrains.Util
       var index = myList.IndexOf(item, myCount);
       return index >= 0;
     }
+
+    // todo: indexof
 
     public bool Remove(T item)
     {
