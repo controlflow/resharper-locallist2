@@ -177,8 +177,8 @@ namespace JetBrains.Util.Tests
     {
       foreach (var list in CreateVariousFilledLocalLists())
       {
-        Console.WriteLine($"count={list.Count}, capacity={list.Capacity}");
-        if (list.Count != 9 || list.Capacity != 16) continue;
+        //Console.WriteLine($"count={list.Count}, capacity={list.Capacity}");
+        //if (list.Count != 9 || list.Capacity != 16) continue;
 
         var enumerator1 = list.GetEnumerator();
 
@@ -217,8 +217,11 @@ namespace JetBrains.Util.Tests
         enumerator2.Dispose();
 
         var enumerator4 = ((IEnumerable) resultingList).GetEnumerator(); // reused
-        Assert.IsTrue(ReferenceEquals(enumerator2, enumerator4));
-        Assert.IsTrue(ReferenceEquals(resultingList, enumerator4));
+        if (list.Count != 0)
+        {
+          Assert.IsTrue(ReferenceEquals(enumerator2, enumerator4));
+          Assert.IsTrue(ReferenceEquals(resultingList, enumerator4));
+        }
 
         AssertItemsInOrder((IEnumerator<int>) enumerator4);
 
