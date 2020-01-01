@@ -112,7 +112,7 @@ namespace JetBrains.Util.DataStructures.Collections
       public abstract int Capacity { get; }
 
       [Pure]
-      public abstract ref T GetItemNoRangeCheck(int index);
+      public abstract ref T ItemRefNoRangeCheck(int index);
 
       public abstract void Append(in T newItem, int count, ref Builder<T> self);
 
@@ -140,7 +140,7 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         for (var index = 0; index < count; index++)
         {
-          var currentItem = GetItemNoRangeCheck(index);
+          var currentItem = ItemRefNoRangeCheck(index);
           if (EqualityComparer<T>.Default.Equals(item, currentItem)) return index;
         }
 
@@ -159,6 +159,16 @@ namespace JetBrains.Util.DataStructures.Collections
           throw new ArgumentOutOfRangeException(nameof(arrayIndex));
 
         CopyToImpl(array, arrayIndex);
+      }
+
+      public virtual void RemoveAt(int indexToRemove, int count)
+      {
+        for (var index = indexToRemove + 1; index < count; index++)
+        {
+          ItemRefNoRangeCheck(index - 1) = ItemRefNoRangeCheck(index);
+        }
+
+        ItemRefNoRangeCheck(count - 1) = default;
       }
 
       #endregion
@@ -318,7 +328,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
         public bool MoveNext() => ++myIndex < myCount;
 
-        public T Current => myBuilder.GetItemNoRangeCheck(myIndex);
+        public T Current => myBuilder.ItemRefNoRangeCheck(myIndex);
         object IEnumerator.Current => Current;
 
         public void Dispose() { }
@@ -392,7 +402,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override int Capacity => 1;
 
-      public override ref T GetItemNoRangeCheck(int index) => ref Item0;
+      public override ref T ItemRefNoRangeCheck(int index) => ref Item0;
 
       public override void Append(in T newItem, int count, ref Builder<T> self)
       {
@@ -473,7 +483,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override int Capacity => 2;
 
-      public override ref T GetItemNoRangeCheck(int index)
+      public override ref T ItemRefNoRangeCheck(int index)
       {
         return ref index == 0 ? ref Item0 : ref Item1;
       }
@@ -577,14 +587,14 @@ namespace JetBrains.Util.DataStructures.Collections
         {
           if ((uint) index >= (uint) ShortCount) ThrowOutOfRange();
 
-          return GetItemNoRangeCheck(index);
+          return ItemRefNoRangeCheck(index);
         }
         set => throw new CollectionReadOnlyException();
       }
 
       public override int Capacity => 3;
 
-      public override ref T GetItemNoRangeCheck(int index)
+      public override ref T ItemRefNoRangeCheck(int index)
       {
         switch (index)
         {
@@ -730,14 +740,14 @@ namespace JetBrains.Util.DataStructures.Collections
         {
           if ((uint) index >= (uint) ShortCount) ThrowOutOfRange();
 
-          return GetItemNoRangeCheck(index);
+          return ItemRefNoRangeCheck(index);
         }
         set => throw new CollectionReadOnlyException();
       }
 
       public override int Capacity => 4;
 
-      public override ref T GetItemNoRangeCheck(int index)
+      public override ref T ItemRefNoRangeCheck(int index)
       {
         switch (index)
         {
@@ -906,7 +916,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override int Capacity => 8;
 
-      public override ref T GetItemNoRangeCheck(int index)
+      public override ref T ItemRefNoRangeCheck(int index)
       {
         switch (index)
         {
@@ -1035,7 +1045,7 @@ namespace JetBrains.Util.DataStructures.Collections
         get
         {
           var index = CountAndIterationData & IteratorOrVersionMask;
-          return GetItemNoRangeCheck(index);
+          return ItemRefNoRangeCheck(index);
         }
       }
 
@@ -1129,7 +1139,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override int Capacity => myArray.Length;
 
-      public override ref T GetItemNoRangeCheck(int index) => ref myArray[index];
+      public override ref T ItemRefNoRangeCheck(int index) => ref myArray[index];
 
       public override void Append(in T newItem, int count, ref Builder<T> self)
       {

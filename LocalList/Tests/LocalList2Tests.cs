@@ -344,6 +344,41 @@ namespace JetBrains.Util.Tests
       }
     }
 
+    [Test]
+    public void Remove()
+    {
+      var random = new Random();
+
+      foreach (var list in CreateVariousFilledLocalLists())
+      {
+        Assert.IsFalse(list.Remove(0));
+
+        if (list.Count > 0)
+        {
+          var valueToRemove = random.Next(0, list.Count) + 1;
+          var countBeforeRemove = list.Count;
+
+          Assert.IsTrue(list.Contains(valueToRemove));
+          Assert.IsTrue(list.Remove(valueToRemove));
+          Assert.IsFalse(list.Remove(valueToRemove)); // unique
+          Assert.IsTrue(list.AllFreeSlotsAreClear());
+
+          Assert.IsFalse(list.Contains(valueToRemove));
+          Assert.AreEqual(countBeforeRemove - 1, list.Count);
+
+          var removedIndex = valueToRemove - 1;
+          if (removedIndex < list.Count)
+          {
+            Assert.AreEqual(list[removedIndex], valueToRemove + 1);
+          }
+        }
+
+        var resultingList = list.ResultingList();
+        Assert.Throws<CollectionReadOnlyException>(() => resultingList.Remove(0));
+        Assert.Throws<InvalidOperationException>(() => list.Remove(0));
+      }
+    }
+
     #region Test helpers
 
     [NotNull] private static readonly int[] CapacitiesToTest =

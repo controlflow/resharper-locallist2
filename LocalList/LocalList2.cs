@@ -137,7 +137,7 @@ namespace JetBrains.Util
 
         if ((uint) index >= (uint) myCount) ThrowOutOfRange();
 
-        return myList.GetItemNoRangeCheck(index);
+        return myList.ItemRefNoRangeCheck(index);
       }
       set
       {
@@ -146,7 +146,7 @@ namespace JetBrains.Util
 
         if ((uint) index >= (uint) myCount) ThrowOutOfRange();
 
-        myList.GetItemNoRangeCheck(index) = value;
+        myList.ItemRefNoRangeCheck(index) = value;
         myList.ModifyVersion();
       }
     }
@@ -187,8 +187,6 @@ namespace JetBrains.Util
       return index >= 0;
     }
 
-    // todo: indexof
-
     public bool Remove(T item)
     {
       if (myList == null) return false;
@@ -197,10 +195,13 @@ namespace JetBrains.Util
       var index = myList.IndexOf(item, myCount);
       if (index < 0) return false;
 
-      //myList.RemoveAt(index);
-      throw null;
+      myList.ModifyVersion();
+      myList.RemoveAt(index, myCount);
+      myCount--;
       return true;
     }
+
+    //  todo: test
 
     public void Clear()
     {
@@ -265,7 +266,7 @@ namespace JetBrains.Util
 
       for (int index = 0, count = myList.Count; index < count; index++)
       {
-        if (predicate(myList.GetItemNoRangeCheck(index)))
+        if (predicate(myList.ItemRefNoRangeCheck(index)))
           return true;
       }
 
@@ -281,7 +282,7 @@ namespace JetBrains.Util
       var count = myList.Count;
       if (count == 0) ThrowEmpty();
 
-      return myList.GetItemNoRangeCheck(count - 1);
+      return myList.ItemRefNoRangeCheck(count - 1);
     }
 
     [Pure]
@@ -293,7 +294,7 @@ namespace JetBrains.Util
       var count = myList.Count;
       if (count == 0) ThrowEmpty();
 
-      return myList.GetItemNoRangeCheck(0);
+      return myList.ItemRefNoRangeCheck(0);
     }
 
     [Pure]
@@ -306,7 +307,7 @@ namespace JetBrains.Util
       if (count == 0) ThrowEmpty();
       if (count > 1) ThrowManyItems();
 
-      return myList.GetItemNoRangeCheck(0);
+      return myList.ItemRefNoRangeCheck(0);
     }
 
     [CanBeNull]
@@ -320,7 +321,7 @@ namespace JetBrains.Util
 
           // we can avoid .Count check here, since all the list contain at least one slot
           // and there is an invariant of storing `default` in unused data slots
-          return myList.GetItemNoRangeCheck(0);
+          return myList.ItemRefNoRangeCheck(0);
         }
 
         return default;
@@ -334,7 +335,7 @@ namespace JetBrains.Util
       if (myList.IsFrozen) ThrowResultObtained();
 
       // note: intentionally no .Count checks
-      return myList.GetItemNoRangeCheck(0);
+      return myList.ItemRefNoRangeCheck(0);
     }
 
     [Pure, CanBeNull]
@@ -347,7 +348,7 @@ namespace JetBrains.Util
       if (count == 0)
         return default;
 
-      return myList.GetItemNoRangeCheck(count - 1);
+      return myList.ItemRefNoRangeCheck(count - 1);
     }
 
     #endregion
@@ -637,7 +638,7 @@ namespace JetBrains.Util
 
       for (var index = 0; index < myCount; index++)
       {
-        builder.Append(myList.GetItemNoRangeCheck(index));
+        builder.Append(myList.ItemRefNoRangeCheck(index));
 
         if (index > 0)
           builder.Append(", ");
@@ -671,7 +672,7 @@ namespace JetBrains.Util
         return ++myIndex < myCount;
       }
 
-      public readonly ref T Current => ref myBuilder.GetItemNoRangeCheck(myIndex);
+      public readonly ref T Current => ref myBuilder.ItemRefNoRangeCheck(myIndex);
 
       [ContractAnnotation("=> halt")]
       [MethodImpl(MethodImplOptions.NoInlining)]
@@ -719,8 +720,9 @@ namespace JetBrains.Util
 
       for (int index = myCount, capacity = myList.Capacity; index < capacity; index++)
       {
-        var item = myList.GetItemNoRangeCheck(index);
-        if (!EqualityComparer<T>.Default.Equals(item, default)) return false;
+        var item = myList.ItemRefNoRangeCheck(index);
+        if (!EqualityComparer<T>.Default.Equals(item, default))
+          return false;
       }
 
       return true;
