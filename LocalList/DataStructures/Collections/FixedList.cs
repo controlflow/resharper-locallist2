@@ -161,16 +161,6 @@ namespace JetBrains.Util.DataStructures.Collections
         CopyToImpl(array, arrayIndex);
       }
 
-      public virtual void RemoveAt(int indexToRemove, int count)
-      {
-        for (var index = indexToRemove + 1; index < count; index++)
-        {
-          ItemRefNoRangeCheck(index - 1) = ItemRefNoRangeCheck(index);
-        }
-
-        ItemRefNoRangeCheck(count - 1) = default;
-      }
-
       #endregion
       #region Write access
 
@@ -206,6 +196,8 @@ namespace JetBrains.Util.DataStructures.Collections
       }
 
       public abstract void Clear(int count);
+
+      public abstract void RemoveAt(int indexToRemove, int count);
 
       public void ModifyVersion()
       {
@@ -452,6 +444,13 @@ namespace JetBrains.Util.DataStructures.Collections
         Item0 = default;
       }
 
+      public override void RemoveAt(int indexToRemove, int count)
+      {
+        Debug.Assert(!IsFrozen);
+
+        Item0 = default;
+      }
+
       protected override void CopyToImpl(T[] array, int arrayIndex)
       {
         if (ShortCount == 1) array[arrayIndex] = Item0;
@@ -550,6 +549,15 @@ namespace JetBrains.Util.DataStructures.Collections
         Debug.Assert(!IsFrozen);
 
         Item0 = default;
+        Item1 = default;
+      }
+
+      public override void RemoveAt(int indexToRemove, int count)
+      {
+        Debug.Assert(!IsFrozen);
+
+        if (indexToRemove < 1) Item0 = Item1;
+
         Item1 = default;
       }
 
@@ -691,6 +699,16 @@ namespace JetBrains.Util.DataStructures.Collections
 
         Item0 = default;
         Item1 = default;
+        Item2 = default;
+      }
+
+      public override void RemoveAt(int indexToRemove, int count)
+      {
+        Debug.Assert(!IsFrozen);
+
+        if (indexToRemove < 1) Item0 = Item1;
+        if (indexToRemove < 2) Item1 = Item2;
+
         Item2 = default;
       }
 
@@ -862,6 +880,17 @@ namespace JetBrains.Util.DataStructures.Collections
         Item3 = default;
       }
 
+      public override void RemoveAt(int indexToRemove, int count)
+      {
+        Debug.Assert(!IsFrozen);
+
+        if (indexToRemove < 1) Item0 = Item1;
+        if (indexToRemove < 2) Item1 = Item2;
+        if (indexToRemove < 3) Item2 = Item3;
+
+        Item3 = default;
+      }
+
       protected override void CopyToImpl(T[] array, int arrayIndex)
       {
         var count = ShortCount;
@@ -899,17 +928,7 @@ namespace JetBrains.Util.DataStructures.Collections
         {
           if ((uint) index >= (uint) ShortCount) ThrowOutOfRange();
 
-          switch (index)
-          {
-            case 0: return Item0;
-            case 1: return Item1;
-            case 2: return Item2;
-            case 3: return Item3;
-            case 4: return Item4;
-            case 5: return Item5;
-            case 6: return Item6;
-            default: return Item7;
-          }
+          return ItemRefNoRangeCheck(index);
         }
         set => throw new CollectionReadOnlyException();
       }
@@ -1060,6 +1079,21 @@ namespace JetBrains.Util.DataStructures.Collections
         Item4 = default;
         Item5 = default;
         Item6 = default;
+        Item7 = default;
+      }
+
+      public override void RemoveAt(int indexToRemove, int count)
+      {
+        Debug.Assert(!IsFrozen);
+
+        if (indexToRemove < 1) Item0 = Item1;
+        if (indexToRemove < 2) Item1 = Item2;
+        if (indexToRemove < 3) Item2 = Item3;
+        if (indexToRemove < 4) Item3 = Item4;
+        if (indexToRemove < 5) Item4 = Item5;
+        if (indexToRemove < 6) Item5 = Item6;
+        if (indexToRemove < 7) Item6 = Item7;
+
         Item7 = default;
       }
 
@@ -1223,6 +1257,20 @@ namespace JetBrains.Util.DataStructures.Collections
       public override int IndexOf(T item, int count)
       {
         return Array.IndexOf(myArray, item, startIndex: 0, count: count);
+      }
+
+      public override void RemoveAt(int indexToRemove, int count)
+      {
+        Debug.Assert(!IsFrozen);
+
+        Array.Copy(
+          sourceArray: myArray,
+          sourceIndex: indexToRemove + 1,
+          destinationArray: myArray,
+          destinationIndex: indexToRemove,
+          length: count - indexToRemove - 1);
+
+        myArray[count - 1] = default;
       }
 
       public override void Clear(int count)
