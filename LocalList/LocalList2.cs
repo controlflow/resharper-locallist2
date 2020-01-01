@@ -225,8 +225,6 @@ namespace JetBrains.Util
       }
     }
 
-    //  todo: test
-
     [Pure, NotNull]
     public IList<T> ResultingList()
     {
@@ -267,7 +265,7 @@ namespace JetBrains.Util
       if (myList == null) return false;
       if (myList.IsFrozen) ThrowResultObtained();
 
-      return myList.Count > 0;
+      return myCount > 0;
     }
 
     [Pure]
@@ -276,7 +274,7 @@ namespace JetBrains.Util
       if (myList == null) return false;
       if (myList.IsFrozen) ThrowResultObtained();
 
-      for (int index = 0, count = myList.Count; index < count; index++)
+      for (var index = 0; index < myCount; index++)
       {
         if (predicate(myList.ItemRefNoRangeCheck(index)))
           return true;
@@ -286,15 +284,18 @@ namespace JetBrains.Util
     }
 
     [Pure]
-    public readonly T Last()
+    public readonly bool All([InstantHandle, NotNull] Func<T, bool> predicate)
     {
-      if (myList == null) ThrowEmpty();
+      if (myList == null) return true;
       if (myList.IsFrozen) ThrowResultObtained();
 
-      var count = myList.Count;
-      if (count == 0) ThrowEmpty();
+      for (var index = 0; index < myCount; index++)
+      {
+        if (!predicate(myList.ItemRefNoRangeCheck(index)))
+          return false;
+      }
 
-      return myList.ItemRefNoRangeCheck(count - 1);
+      return true;
     }
 
     [Pure]
@@ -307,6 +308,18 @@ namespace JetBrains.Util
       if (count == 0) ThrowEmpty();
 
       return myList.ItemRefNoRangeCheck(0);
+    }
+
+    [Pure]
+    public readonly T Last()
+    {
+      if (myList == null) ThrowEmpty();
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      var count = myList.Count;
+      if (count == 0) ThrowEmpty();
+
+      return myList.ItemRefNoRangeCheck(count - 1);
     }
 
     [Pure]

@@ -413,11 +413,41 @@ namespace JetBrains.Util.Tests
           }
 
           Assert.AreEqual(countBeforeRemove - 1, list.Count);
+          Assert.IsTrue(list.AllFreeSlotsAreClear());
         }
 
         var resultingList = list.ResultingList();
         Assert.Throws<InvalidOperationException>(() => list.RemoveAt(0));
         Assert.Throws<CollectionReadOnlyException>(() => resultingList.RemoveAt(0));
+      }
+    }
+
+    [Test]
+    public void LinqAny()
+    {
+      var random = new Random();
+
+      foreach (var list in CreateVariousFilledLocalLists())
+      {
+        Assert.AreEqual(list.Any(), list.Count > 0);
+
+        var itemToFind = random.Next(0, list.Count) + 1;
+
+        Assert.AreEqual(
+          list.Any(x => x == itemToFind),
+          list.Contains(itemToFind));
+
+        Assert.AreEqual(
+          list.All(x => x != itemToFind),
+          !list.Contains(itemToFind));
+
+        Assert.IsFalse(list.Any(x => x == 0));
+        Assert.IsTrue(list.All(x => x > 0));
+
+        _ = list.ResultingList();
+
+        Assert.Throws<InvalidOperationException>(() => _ = list.Any());
+        Assert.Throws<InvalidOperationException>(() => _ = list.Any(x => true));
       }
     }
 
