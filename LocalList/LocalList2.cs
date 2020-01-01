@@ -72,28 +72,12 @@ namespace JetBrains.Util
       myCount = 0;
 
       if (forceUseArray && capacity > 0)
-      {
         myList = new FixedList.ListOfArray<T>(capacity);
-      }
       else
-      {
-        switch (capacity)
-        {
-          case 0: myList = null; break;
-          case 1: myList = new FixedList.ListOf1<T>(); break;
-          case 2: myList = new FixedList.ListOf2<T>(); break;
-          case 3: myList = new FixedList.ListOf3<T>(); break;
-          case 4: myList = new FixedList.ListOf4<T>(); break;
-          case 5:
-          case 6:
-          case 7:
-          case 8: myList = new FixedList.ListOf8<T>(); break;
-          default: myList = new FixedList.ListOfArray<T>(capacity); break;
-        }
-      }
+        myList = CreateBuilderWithCapacity(capacity);
     }
 
-    // todo:
+    // todo: ctors
 
     public LocalList2([NotNull] IEnumerable<T> enumerable)
     {
@@ -379,6 +363,61 @@ namespace JetBrains.Util
     }
 
     #endregion
+    #region Capacity management
+
+    public void EnsureCapacity(int capacity)
+    {
+      if (myList == null)
+      {
+        myList = CreateBuilderWithCapacity(capacity);
+      }
+      else
+      {
+        if (myList.IsFrozen) ThrowResultObtained();
+
+        if (capacity <= myList.Capacity) return;
+
+        var newList = CreateBuilderWithCapacity(capacity);
+        Debug.Assert(newList != null);
+
+        for (var index = 0; index < myCount; index++)
+        {
+          newList.ItemRefNoRangeCheck(index) = myList.ItemRefNoRangeCheck(index);
+        }
+
+        newList.CountAndIterationData = myList.CountAndIterationData;
+        myList = newList;
+      }
+    }
+
+    [Pure, CanBeNull]
+    private static FixedList.Builder<T> CreateBuilderWithCapacity(int capacity)
+    {
+      switch (capacity)
+      {
+        case 0: return null;
+        case 1: return new FixedList.ListOf1<T>();
+        case 2: return new FixedList.ListOf2<T>();
+        case 3: return new FixedList.ListOf3<T>();
+        case 4: return new FixedList.ListOf4<T>();
+        case 5:
+        case 6:
+        case 7:
+        case 8: return new FixedList.ListOf8<T>();
+        default: return new FixedList.ListOfArray<T>(capacity);
+      }
+    }
+
+    public void TrimExcess()
+    {
+      if (myList == null) return;
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      myList = myList.TrimExcess(myCount, false);
+    }
+
+    #endregion
+
 
     public void AddRange<TSource>([NotNull] IEnumerable<TSource> items)
       where TSource : T
@@ -443,26 +482,7 @@ namespace JetBrains.Util
       myCount += count;
     }
 
-    public void EnsureCapacity(int capacity, bool exact = false)
-    {
-      var currentSize = Capacity;
-      if (capacity <= currentSize) return;
 
-      var newSize = capacity * 2;
-      if (exact)
-      {
-        newSize = capacity;
-      }
-
-      var newArray = new T[newSize];
-
-      if (myArray != null)
-      {
-        Array.Copy(myArray, 0, newArray, 0, myArray.Length);
-      }
-
-      myArray = newArray;
-    }
 
     [Pure, NotNull]
     public T[] ToArray()

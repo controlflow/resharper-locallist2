@@ -99,6 +99,7 @@ namespace JetBrains.Util.Tests
       }
     }
 
+    // todo: indexer setter tests
     [Test]
     public void AddCountIndex()
     {
@@ -128,6 +129,7 @@ namespace JetBrains.Util.Tests
         var resultingList = list.ResultingList();
         _ = list.Count; // do not throws
 
+        Assert.AreEqual(list.Count, resultingList.Count);
         Assert.Throws<InvalidOperationException>(() => _ = list.ResultingList());
 
         // the same APIs via IList<T> interface
@@ -502,6 +504,56 @@ namespace JetBrains.Util.Tests
         Assert.Throws<InvalidOperationException>(() => _ = list.SingleItem);
       }
     }
+
+    [Test]
+    public void CapacityManagement()
+    {
+      foreach (var list in CreateVariousFilledLocalLists())
+      {
+        var oldCapacity = list.Capacity;
+        var countBefore = list.Count;
+        var enumeratorBefore = list.GetEnumerator();
+
+        list.TrimExcess();
+
+        Assert.IsTrue(list.AllFreeSlotsAreClear());
+
+        for (var index = 0; index < list.Count; index++)
+        {
+          Assert.AreEqual(list[index], index + 1);
+        }
+
+        Assert.LessOrEqual(list.Capacity, oldCapacity);
+        Assert.LessOrEqual(list.Count, list.Capacity);
+        Assert.AreEqual(countBefore, list.Count);
+        Assert.DoesNotThrow(() => enumeratorBefore.MoveNext());
+
+        var enumeratorBefore2 = list.GetEnumerator();
+
+        list.EnsureCapacity(oldCapacity);
+
+        Assert.AreEqual(oldCapacity, list.Capacity);
+        Assert.AreEqual(countBefore, list.Count);
+        Assert.DoesNotThrow(() => enumeratorBefore2.MoveNext());
+
+        list.EnsureCapacity(0);
+        Assert.AreEqual(oldCapacity, list.Capacity);
+
+        for (var index = 0; index < list.Count; index++)
+        {
+          Assert.AreEqual(list[index], index + 1);
+        }
+
+        _ = list.ResultingList();
+
+        Assert.Throws<InvalidOperationException>(() => list.TrimExcess());
+        Assert.Throws<InvalidOperationException>(() => list.EnsureCapacity(0));
+      }
+    }
+
+    // todo: CopyTo()
+    // todo: Insert()
+    // todo: AddRange()
 
     #region Test helpers
 

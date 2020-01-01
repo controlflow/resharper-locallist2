@@ -119,8 +119,7 @@ namespace JetBrains.Util.DataStructures.Collections
       [NotNull, Pure]
       public abstract Builder<T> Clone(int count);
 
-      [CanBeNull]
-      public abstract Builder<T> TrimExcess(int count, bool clone);
+      [CanBeNull] public abstract Builder<T> TrimExcess(int count, bool clone);
 
       protected abstract void CopyToImpl([NotNull] T[] array, int arrayIndex);
 
