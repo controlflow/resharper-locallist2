@@ -357,10 +357,18 @@ namespace JetBrains.Util.Tests
         {
           var valueToRemove = random.Next(0, list.Count) + 1;
           var countBeforeRemove = list.Count;
+          var enumeratorBefore = list.GetEnumerator();
 
           Assert.IsTrue(list.Contains(valueToRemove));
           Assert.IsTrue(list.Remove(valueToRemove));
+
+          Assert.Throws<InvalidOperationException>(() => enumeratorBefore.MoveNext());
+
+          var enumeratorBefore2 = list.GetEnumerator();
+
           Assert.IsFalse(list.Remove(valueToRemove)); // unique
+          Assert.DoesNotThrow(() => enumeratorBefore2.MoveNext());
+
           Assert.IsTrue(list.AllFreeSlotsAreClear());
 
           Assert.IsFalse(list.Contains(valueToRemove));
@@ -376,6 +384,40 @@ namespace JetBrains.Util.Tests
         var resultingList = list.ResultingList();
         Assert.Throws<CollectionReadOnlyException>(() => resultingList.Remove(0));
         Assert.Throws<InvalidOperationException>(() => list.Remove(0));
+      }
+    }
+
+    [Test]
+    public void RemoveAt()
+    {
+      var random = new Random();
+
+      foreach (var list in CreateVariousFilledLocalLists())
+      {
+        Assert.Throws<ArgumentOutOfRangeException>(() => list.RemoveAt(-1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => list.RemoveAt(list.Count));
+
+        if (list.Count > 0)
+        {
+          var randomIndex = random.Next(0, list.Count);
+          var countBeforeRemove = list.Count;
+          var enumeratorBefore = list.GetEnumerator();
+
+          list.RemoveAt(randomIndex);
+
+          Assert.Throws<InvalidOperationException>(() => enumeratorBefore.MoveNext());
+
+          if (randomIndex < list.Count)
+          {
+            Assert.AreEqual(list[randomIndex], randomIndex + 2);
+          }
+
+          Assert.AreEqual(countBeforeRemove - 1, list.Count);
+        }
+
+        var resultingList = list.ResultingList();
+        Assert.Throws<InvalidOperationException>(() => list.RemoveAt(0));
+        Assert.Throws<CollectionReadOnlyException>(() => resultingList.RemoveAt(0));
       }
     }
 

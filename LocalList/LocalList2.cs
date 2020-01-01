@@ -201,7 +201,17 @@ namespace JetBrains.Util
       return true;
     }
 
-    //  todo: test
+    public void RemoveAt(int index)
+    {
+      if (myList == null) ThrowOutOfRange();
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      if ((uint) index >= (uint) myCount) ThrowOutOfRange();
+
+      myList.ModifyVersion();
+      myList.RemoveAt(index, myCount);
+      myCount--;
+    }
 
     public void Clear()
     {
@@ -214,6 +224,8 @@ namespace JetBrains.Util
         myCount = 0;
       }
     }
+
+    //  todo: test
 
     [Pure, NotNull]
     public IList<T> ResultingList()
@@ -568,23 +580,7 @@ namespace JetBrains.Util
       myVersion++;
     }
 
-    public void RemoveAt(int index)
-    {
-      if (myVersion == -1) ThrowResultObtained();
-      if ((uint)index >= (uint)myCount) ThrowOutOfRange();
 
-      myCount--;
-
-      if (myCount > 0)
-      {
-        if (index < myCount)
-          Array.Copy(myArray, index + 1, myArray, index, myCount - index);
-      }
-
-      myArray[myCount] = default;
-
-      myVersion++;
-    }
 
     public void UnstableSortInplace([NotNull] IComparer<T> comparer)
     {
