@@ -7,6 +7,7 @@ using NUnit.Framework;
 // ReSharper disable RedundantArgumentDefaultValue
 // ReSharper disable ArgumentsStyleLiteral
 // ReSharper disable AssignmentIsFullyDiscarded
+// ReSharper disable UseIndexFromEndExpression
 
 namespace JetBrains.Util.Tests
 {
@@ -423,7 +424,7 @@ namespace JetBrains.Util.Tests
     }
 
     [Test]
-    public void LinqAny()
+    public void LinqAnyAll()
     {
       var random = new Random();
 
@@ -448,6 +449,57 @@ namespace JetBrains.Util.Tests
 
         Assert.Throws<InvalidOperationException>(() => _ = list.Any());
         Assert.Throws<InvalidOperationException>(() => _ = list.Any(x => true));
+        Assert.Throws<InvalidOperationException>(() => _ = list.All(x => true));
+      }
+    }
+
+    [Test]
+    public void LinqFirstLastSingle()
+    {
+      foreach (var list in CreateVariousFilledLocalLists())
+      {
+        if (list.Count == 0)
+        {
+          Assert.Throws<InvalidOperationException>(() => _ = list.First());
+          Assert.Throws<InvalidOperationException>(() => _ = list.Last());
+          Assert.AreEqual(0, list.FirstOrDefault());
+          Assert.AreEqual(0, list.LastOrDefault());
+          Assert.AreEqual(0, list.SingleItem);
+        }
+        else
+        {
+          Assert.AreEqual(list[0], list.First());
+          Assert.AreEqual(list[0], list.FirstOrDefault());
+          Assert.AreEqual(list[list.Count - 1], list.Last());
+          Assert.AreEqual(list[list.Count - 1], list.LastOrDefault());
+        }
+
+        if (list.Count == 1)
+        {
+          Assert.AreEqual(list[0], list.Single());
+          Assert.AreEqual(list[0], list.SingleOrDefault());
+          Assert.AreEqual(list[0], list.SingleItem);
+        }
+        else
+        {
+          Assert.Throws<InvalidOperationException>(() => _ = list.Single());
+          Assert.AreEqual(0, list.SingleItem);
+
+          if (list.Count > 1)
+            Assert.Throws<InvalidOperationException>(() => _ = list.SingleOrDefault());
+          else
+            Assert.AreEqual(0, list.SingleOrDefault());
+        }
+
+        _ = list.ResultingList();
+
+        Assert.Throws<InvalidOperationException>(() => _ = list.First());
+        Assert.Throws<InvalidOperationException>(() => _ = list.Single());
+        Assert.Throws<InvalidOperationException>(() => _ = list.Last());
+        Assert.Throws<InvalidOperationException>(() => _ = list.FirstOrDefault());
+        Assert.Throws<InvalidOperationException>(() => _ = list.SingleOrDefault());
+        Assert.Throws<InvalidOperationException>(() => _ = list.LastOrDefault());
+        Assert.Throws<InvalidOperationException>(() => _ = list.SingleItem);
       }
     }
 
@@ -478,7 +530,6 @@ namespace JetBrains.Util.Tests
 
       // some special cases
       yield return new LocalList2<int>(capacity: 1, forceUseArray: true);
-
 
       var largeCapacity = ushort.MaxValue * 2;
       yield return new LocalList2<int>(largeCapacity);

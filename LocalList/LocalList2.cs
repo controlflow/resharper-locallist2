@@ -303,9 +303,7 @@ namespace JetBrains.Util
     {
       if (myList == null) ThrowEmpty();
       if (myList.IsFrozen) ThrowResultObtained();
-
-      var count = myList.Count;
-      if (count == 0) ThrowEmpty();
+      if (myCount == 0) ThrowEmpty();
 
       return myList.ItemRefNoRangeCheck(0);
     }
@@ -315,11 +313,9 @@ namespace JetBrains.Util
     {
       if (myList == null) ThrowEmpty();
       if (myList.IsFrozen) ThrowResultObtained();
+      if (myCount == 0) ThrowEmpty();
 
-      var count = myList.Count;
-      if (count == 0) ThrowEmpty();
-
-      return myList.ItemRefNoRangeCheck(count - 1);
+      return myList.ItemRefNoRangeCheck(myCount - 1);
     }
 
     [Pure]
@@ -328,9 +324,8 @@ namespace JetBrains.Util
       if (myList == null) ThrowEmpty();
       if (myList.IsFrozen) ThrowResultObtained();
 
-      var count = myList.Count;
-      if (count == 0) ThrowEmpty();
-      if (count > 1) ThrowManyItems();
+      if (myCount == 0) ThrowEmpty();
+      if (myCount > 1) ThrowManyItems();
 
       return myList.ItemRefNoRangeCheck(0);
     }
@@ -340,16 +335,12 @@ namespace JetBrains.Util
     {
       get
       {
-        if (myList != null)
-        {
-          if (myList.IsFrozen) ThrowResultObtained();
+        if (myList == null) return default;
+        if (myList.IsFrozen) ThrowResultObtained();
 
-          // we can avoid .Count check here, since all the list contain at least one slot
-          // and there is an invariant of storing `default` in unused data slots
-          return myList.ItemRefNoRangeCheck(0);
-        }
+        if (myCount > 1) return default;
 
-        return default;
+        return myList.ItemRefNoRangeCheck(0);
       }
     }
 
@@ -359,7 +350,20 @@ namespace JetBrains.Util
       if (myList == null) return default;
       if (myList.IsFrozen) ThrowResultObtained();
 
-      // note: intentionally no .Count checks
+      // note: intentionally no `myCount` checks
+      return myList.ItemRefNoRangeCheck(0);
+    }
+
+    [Pure]
+    public readonly T SingleOrDefault()
+    {
+      if (myList == null) return default;
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      if (myCount == 0) return default;
+      if (myCount > 1) ThrowManyItems();
+
+      // note: intentionally no `myCount` checks
       return myList.ItemRefNoRangeCheck(0);
     }
 
@@ -369,11 +373,9 @@ namespace JetBrains.Util
       if (myList == null) return default;
       if (myList.IsFrozen) ThrowResultObtained();
 
-      var count = Count;
-      if (count == 0)
-        return default;
+      if (myCount == 0) return default;
 
-      return myList.ItemRefNoRangeCheck(count - 1);
+      return myList.ItemRefNoRangeCheck(myCount - 1);
     }
 
     #endregion
