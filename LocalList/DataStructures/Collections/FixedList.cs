@@ -119,7 +119,8 @@ namespace JetBrains.Util.DataStructures.Collections
       [NotNull, Pure]
       public abstract Builder<T> Clone(int count);
 
-      [CanBeNull] public abstract Builder<T> TrimExcess(int count, bool clone);
+      [CanBeNull]
+      public abstract Builder<T> TrimExcess(int count, bool clone);
 
       protected abstract void CopyToImpl([NotNull] T[] array, int arrayIndex);
 
@@ -239,16 +240,6 @@ namespace JetBrains.Util.DataStructures.Collections
       protected const int CountShift = 16;
 
       protected const int MaxCount = (int) (uint.MaxValue >> (CountShift + 1));
-
-      protected const int NotFrozenCount0 = NotFrozenBit;
-      public const int NotFrozenCount1 = (1 << CountShift) | NotFrozenBit;
-      public const int NotFrozenCount2 = (2 << CountShift) | NotFrozenBit;
-      public const int NotFrozenCount3 = (3 << CountShift) | NotFrozenBit;
-      public const int NotFrozenCount4 = (4 << CountShift) | NotFrozenBit;
-      protected const int NotFrozenCount5 = (5 << CountShift) | NotFrozenBit;
-      protected const int NotFrozenCount6 = (6 << CountShift) | NotFrozenBit;
-      protected const int NotFrozenCount7 = (7 << CountShift) | NotFrozenBit;
-      protected const int NotFrozenCount8 = (8 << CountShift) | NotFrozenBit;
 
       protected const int IteratorOrVersionMask = (1 << CountShift) - 1;
       protected const int VersionAndCountIncrement = (1 << CountShift) + 1;
@@ -529,7 +520,7 @@ namespace JetBrains.Util.DataStructures.Collections
         switch (count)
         {
           case 0: return null;
-          case 1: return new ListOf1<T> {CountAndIterationData = NotFrozenCount1, Item0 = Item0};
+          case 1: return new ListOf1<T> {Item0 = Item0};
           default: return clone ? Clone(count) : this;
         }
       }
@@ -656,26 +647,10 @@ namespace JetBrains.Util.DataStructures.Collections
 
         switch (count)
         {
-          case 0:
-            return null;
-
-          case 1:
-            return new ListOf1<T>
-            {
-              CountAndIterationData = NotFrozenCount1,
-              Item0 = Item0
-            };
-
-          case 2:
-            return new ListOf2<T>
-            {
-              CountAndIterationData = NotFrozenCount2,
-              Item0 = Item0,
-              Item1 = Item1
-            };
-
-          default:
-            return clone ? Clone(count) : this;
+          case 0: return null;
+          case 1: return new ListOf1<T> { Item0 = Item0 };
+          case 2: return new ListOf2<T> { Item0 = Item0, Item1 = Item1 };
+          default: return clone ? Clone(count) : this;
         }
       }
 
@@ -739,7 +714,6 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public ListOf4(in T item0)
       {
-        CountAndIterationData = NotFrozenCount1;
         Item0 = item0;
       }
 
@@ -823,35 +797,11 @@ namespace JetBrains.Util.DataStructures.Collections
 
         switch (count)
         {
-          case 0:
-            return null;
-
-          case 1:
-            return new ListOf1<T>
-            {
-              CountAndIterationData = NotFrozenCount1,
-              Item0 = Item0
-            };
-
-          case 2:
-            return new ListOf2<T>
-            {
-              CountAndIterationData = NotFrozenCount2,
-              Item0 = Item0,
-              Item1 = Item1
-            };
-
-          case 3:
-            return new ListOf3<T>
-            {
-              CountAndIterationData = NotFrozenCount3,
-              Item0 = Item0,
-              Item1 = Item1,
-              Item2 = Item2
-            };
-
-          default:
-            return clone ? Clone(count) : this;
+          case 0: return null;
+          case 1: return new ListOf1<T> { Item0 = Item0 };
+          case 2: return new ListOf2<T> { Item0 = Item0, Item1 = Item1 };
+          case 3: return new ListOf3<T> { Item0 = Item0, Item1 = Item1, Item2 = Item2 };
+          default: return clone ? Clone(count) : this;
         }
       }
 
@@ -1010,51 +960,12 @@ namespace JetBrains.Util.DataStructures.Collections
 
         switch (count)
         {
-          case 0:
-            return null;
-
-          case 1:
-            return new ListOf1<T>
-            {
-              CountAndIterationData = NotFrozenCount1,
-              Item0 = Item0
-            };
-
-          case 2:
-            return new ListOf2<T>
-            {
-              CountAndIterationData = NotFrozenCount2,
-              Item0 = Item0,
-              Item1 = Item1
-            };
-
-          case 3:
-            return new ListOf3<T>
-            {
-              CountAndIterationData = NotFrozenCount3,
-              Item0 = Item0,
-              Item1 = Item1,
-              Item2 = Item2
-            };
-
-          case 4:
-            return new ListOf4<T>
-            {
-              CountAndIterationData = NotFrozenCount4,
-              Item0 = Item0,
-              Item1 = Item1,
-              Item2 = Item2,
-              Item3 = Item3
-            };
-
-          // todo: allocate as an array?
-          // case 5:
-          // case 6:
-          // case 7:
-          //   return new ListOfArray<T>();
-
-          default:
-            return clone ? Clone(count) : this;
+          case 0: return null;
+          case 1: return new ListOf1<T> { Item0 = Item0};
+          case 2: return new ListOf2<T> { Item0 = Item0, Item1 = Item1 };
+          case 3: return new ListOf3<T> { Item0 = Item0, Item1 = Item1, Item2 = Item2 };
+          case 4: return new ListOf4<T> { Item0 = Item0, Item1 = Item1, Item2 = Item2, Item3 = Item3};
+          default: return clone ? Clone(count) : this;
         }
       }
 
@@ -1211,45 +1122,12 @@ namespace JetBrains.Util.DataStructures.Collections
 
         switch (count)
         {
-          case 0:
-            return null;
-
-          case 1:
-            return new ListOf1<T>
-            {
-              CountAndIterationData = FixedBuilder<T>.NotFrozenCount1,
-              Item0 = myArray[0]
-            };
-
-          case 2:
-            return new ListOf2<T>
-            {
-              CountAndIterationData = FixedBuilder<T>.NotFrozenCount2,
-              Item0 = myArray[0],
-              Item1 = myArray[1]
-            };
-
-          case 3:
-            return new ListOf3<T>
-            {
-              CountAndIterationData = FixedBuilder<T>.NotFrozenCount3,
-              Item0 = myArray[0],
-              Item1 = myArray[1],
-              Item2 = myArray[2]
-            };
-
-          case 4:
-            return new ListOf4<T>
-            {
-              CountAndIterationData = FixedBuilder<T>.NotFrozenCount4,
-              Item0 = myArray[0],
-              Item1 = myArray[1],
-              Item2 = myArray[2],
-              Item3 = myArray[3]
-            };
-
-          default:
-            return clone ? Clone(count) : this;
+          case 0: return null;
+          case 1: return new ListOf1<T> { Item0 = myArray[0] };
+          case 2: return new ListOf2<T> { Item0 = myArray[0], Item1 = myArray[1] };
+          case 3: return new ListOf3<T> { Item0 = myArray[0], Item1 = myArray[1], Item2 = myArray[2] };
+          case 4: return new ListOf4<T> { Item0 = myArray[0], Item1 = myArray[1], Item2 = myArray[2], Item3 = myArray[3] };
+          default: return clone ? Clone(count) : this;
         }
       }
 

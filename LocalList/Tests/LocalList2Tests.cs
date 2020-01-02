@@ -554,6 +554,7 @@ namespace JetBrains.Util.Tests
     // todo: CopyTo()
     // todo: Insert()
     // todo: AddRange()
+    // todo: ToString()
 
     #region Test helpers
 
