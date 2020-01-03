@@ -117,7 +117,22 @@ namespace JetBrains.Util.Tests
         }
 
         Assert.Throws<ArgumentOutOfRangeException>(() => _ = list[-1]);
+        Assert.Throws<ArgumentOutOfRangeException>(() => list[-1] = 42);
         Assert.Throws<ArgumentOutOfRangeException>(() => _ = list[list.Count]);
+        Assert.Throws<ArgumentOutOfRangeException>(() => list[list.Count] = 42);
+
+        // store in reverse via indexer setter
+        for (var index = 0; index < bytes.Length; index++)
+        {
+          list[list.Count - index - 1] = bytes[index];
+        }
+
+        if (list.Count > 0)
+        {
+          var enumerator = list.GetEnumerator();
+          list[0] = list[0];
+          Assert.Throws<InvalidOperationException>(() => enumerator.MoveNext());
+        }
 
         var resultingList = list.ResultingList();
         _ = list.Count; // do not throws
@@ -128,14 +143,18 @@ namespace JetBrains.Util.Tests
         // the same APIs via IList<T> interface
         for (var index = 0; index < list.Count; index++)
         {
-          Assert.AreEqual(bytes[index], resultingList[index]);
+          Assert.AreEqual(bytes[bytes.Length - index - 1], resultingList[index]);
         }
 
+        Assert.Throws<CollectionReadOnlyException>(() => resultingList[0] = 42);
         Assert.Throws<CollectionReadOnlyException>(() => resultingList.Add(42));
 
         // results obtained checks
         if (list.Count > 0)
+        {
           Assert.Throws<InvalidOperationException>(() => _ = list[0]);
+          Assert.Throws<InvalidOperationException>(() => list[0] = 42);
+        }
 
         Assert.Throws<InvalidOperationException>(() => list.Add(42));
       }
