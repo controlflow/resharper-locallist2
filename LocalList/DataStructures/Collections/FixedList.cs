@@ -10,7 +10,6 @@ using JetBrains.Annotations;
 namespace JetBrains.Util.DataStructures.Collections
 {
   // todo: test enumeration/index access speed of T[] vs 8 fields
-  // todo: reduce the amount of code performing fields dispatch?
 
   [PublicAPI]
   public static class FixedList
@@ -89,24 +88,12 @@ namespace JetBrains.Util.DataStructures.Collections
     [DebuggerTypeProxy(typeof(BuilderDebugView<>))]
     internal abstract class Builder<T> : IReadOnlyList<T>, IList<T>
     {
-      // [ 1 bit ] [   15 bits   ]  [        16 bits        ]
-      //     |            |                     |
-      //     |            |                     +-- version OR iteration data
-      //     |            |                         = 0xFFFF - before enumeration
-      //     |            |                         = x < count - at x's element
-      //     |            |                         = count - enumeration ended
-      //     |            |
-      //     |            +-- items count, unsigned
-      //     |
-      //     +-- frozen (1) or not (0)
-      //
       // note: this must be of `int` type to use `Interlocked.CompareExchange()`
       internal int CountAndIterationData;
 
       internal bool IsFrozen => CountAndIterationData >= 0;
 
-      protected const int FrozenBitShift = 31;
-      protected const int NotFrozenBit = 1 << FrozenBitShift;
+      protected const int NotFrozenBit = 1 << 31;
 
       public abstract int Count { get; }
       public abstract int Capacity { get; }
@@ -210,14 +197,6 @@ namespace JetBrains.Util.DataStructures.Collections
           "index", "Index should be non-negative and less than Count");
       }
 
-      [ContractAnnotation("=> halt")]
-      [MethodImpl(MethodImplOptions.NoInlining)]
-      protected static void ThrowResultObtained()
-      {
-        throw new InvalidOperationException(
-          "Result has been already obtained from this list");
-      }
-
       public abstract void Clear(int count);
 
       public abstract void RemoveAt(int indexToRemove, int count);
@@ -250,7 +229,7 @@ namespace JetBrains.Util.DataStructures.Collections
         CountAndIterationData = (int) ((uint) count << CountShift) | BeforeGetEnumerator;
       }
 
-      public int ShortCount
+      protected int ShortCount
       {
         get
         {
@@ -260,15 +239,14 @@ namespace JetBrains.Util.DataStructures.Collections
         }
       }
 
-      protected const int CountShift = 16;
+      private const int CountShift = 16;
 
-      protected const int MaxCount = (int) (uint.MaxValue >> (CountShift + 1));
+      private const int MaxCount = (int) (uint.MaxValue >> (CountShift + 1));
 
       protected const int IteratorOrVersionMask = (1 << CountShift) - 1;
-      protected const int VersionAndCountIncrement = (1 << CountShift) + 1;
 
-      protected const int BeforeGetEnumerator = IteratorOrVersionMask - 1;
-      protected const int BeforeFirstElement = IteratorOrVersionMask;
+      private const int BeforeGetEnumerator = IteratorOrVersionMask - 1;
+      private const int BeforeFirstElement = IteratorOrVersionMask;
 
       public sealed override int Count => ShortCount;
 
@@ -984,10 +962,10 @@ namespace JetBrains.Util.DataStructures.Collections
       [NotNull] private T[] myArray;
       private int myCount; // use this instead of myCountAndVersionData
 
-      protected const int BeforeGetEnumerator = (int) 0x7FFFFFFEu;
-      protected const int BeforeFirstElement = (int) 0x7FFFFFFFu;
+      private const int BeforeGetEnumerator = (int) 0x7FFFFFFEu;
+      private const int BeforeFirstElement = (int) 0x7FFFFFFFu;
 
-      protected const int IteratorOrVersionMask = BeforeFirstElement;
+      private const int IteratorOrVersionMask = BeforeFirstElement;
 
       public ListOfArray(int capacity)
       {
@@ -1000,7 +978,6 @@ namespace JetBrains.Util.DataStructures.Collections
         Debug.Assert(array != null);
         Debug.Assert(array.Length > 0);
 
-        // todo: nope
         CountAndIterationData = BeforeGetEnumerator; // frozen
         myArray = array;
         myCount = count;
@@ -1096,7 +1073,7 @@ namespace JetBrains.Util.DataStructures.Collections
       public override void Freeze(int count)
       {
         myCount = count;
-        CountAndIterationData = BeforeGetEnumerator; // todo: FIX this
+        CountAndIterationData = BeforeGetEnumerator;
       }
 
       public override void CopyToImpl(T[] array, int arrayIndex, int count)
@@ -1240,7 +1217,7 @@ namespace JetBrains.Util.DataStructures.Collections
       public BuilderDebugView([NotNull] Builder<T> builder)
       {
         var array = new T[builder.Count];
-        builder.CopyTo(array, arrayIndex: 0);
+        builder.CopyToImpl(array, arrayIndex: 0, builder.Capacity);
         Items = array;
       }
 

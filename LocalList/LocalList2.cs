@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -101,6 +102,7 @@ namespace JetBrains.Util
     }
 
     #endregion
+    #region Manipulations
 
     /// <summary>
     /// Gets the number of elements contained in the <see cref="LocalList2{T}"/>.
@@ -112,7 +114,7 @@ namespace JetBrains.Util
       get
       {
         if (myList == null) ThrowOutOfRange();
-        if (myList.IsFrozen) ThrowResultObtained();
+        if (myList.IsFrozen) ThrowResultObtained(); // note: can be relaxed
 
         if ((uint) index >= (uint) myCount) ThrowOutOfRange();
 
@@ -145,25 +147,6 @@ namespace JetBrains.Util
       }
 
       myCount++;
-    }
-
-    [Pure]
-    public readonly int IndexOf(T item)
-    {
-      if (myList == null) return -1;
-      if (myList.IsFrozen) ThrowResultObtained();
-
-      return myList.IndexOf(item, myCount);
-    }
-
-    [Pure]
-    public readonly bool Contains(T item)
-    {
-      if (myList == null) return false;
-      if (myList.IsFrozen) ThrowResultObtained();
-
-      var index = myList.IndexOf(item, myCount);
-      return index >= 0;
     }
 
     public bool Remove(T item)
@@ -204,6 +187,28 @@ namespace JetBrains.Util
       }
     }
 
+    [Pure]
+    public readonly int IndexOf(T item)
+    {
+      if (myList == null) return -1;
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      return myList.IndexOf(item, myCount);
+    }
+
+    [Pure]
+    public readonly bool Contains(T item)
+    {
+      if (myList == null) return false;
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      var index = myList.IndexOf(item, myCount);
+      return index >= 0;
+    }
+
+    #endregion
+    #region Results obtain
+
     public readonly void CopyTo([NotNull] T[] array, int arrayIndex)
     {
       if (array == null)
@@ -222,7 +227,26 @@ namespace JetBrains.Util
       }
     }
 
-    [Pure, NotNull]
+    [MustUseReturnValue, NotNull]
+    public T[] ToArray()
+    {
+      if (myList == null)
+      {
+        myList = FrozenEmpty;
+        return EmptyArray<T>.Instance;
+      }
+
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      var array = new T[myCount];
+
+      myList.CopyToImpl(array, 0, myCount);
+      myList.Freeze(myCount);
+
+      return array;
+    }
+
+    [MustUseReturnValue, NotNull]
     public IList<T> ResultingList()
     {
       if (myList == null)
@@ -238,7 +262,7 @@ namespace JetBrains.Util
       return myCount == 0 ? EmptyList<T>.InstanceList : myList;
     }
 
-    [Pure, NotNull]
+    [MustUseReturnValue, NotNull]
     public IReadOnlyList<T> ReadOnlyList()
     {
       if (myList == null)
@@ -254,6 +278,7 @@ namespace JetBrains.Util
       return myCount == 0 ? EmptyList<T>.ReadOnly : myList;
     }
 
+    #endregion
     #region LINQ-like methods
 
     [Pure]
@@ -517,24 +542,6 @@ namespace JetBrains.Util
 
 
 
-    [Pure, NotNull]
-    public T[] ToArray()
-    {
-      if (myVersion == -1) ThrowResultObtained();
-
-      myVersion = -1;
-
-      if (myArray == null | myCount == 0)
-        return EmptyArray<T>.Instance;
-      if (myArray.Length == myCount)
-        return myArray;
-
-      var array = new T[myCount];
-      Array.Copy(myArray, 0, array, 0, myCount);
-      return array;
-    }
-
-
 
 
 
@@ -652,19 +659,6 @@ namespace JetBrains.Util
       }
     }
 
-    [Pure]
-    public readonly ElementEnumerator GetEnumerator()
-    {
-      if (myList != null)
-      {
-        if (myList.IsFrozen) ThrowResultObtained();
-
-        return new ElementEnumerator(myList, myCount);
-      }
-
-      return new ElementEnumerator(FrozenEmpty, 0);
-    }
-
     public override readonly string ToString()
     {
       if (myList == null) return "[]";
@@ -685,8 +679,20 @@ namespace JetBrains.Util
       return builder.Append("]").ToString();
     }
 
-    private static FixedList.Builder<T> Empty = new FixedList.ListOf4<T>();
-    private static FixedList.Builder<T> FrozenEmpty = new FixedList.ListOf4<T> { CountAndIterationData = 0 };
+    #region Enumeration
+
+    [Pure]
+    public readonly ElementEnumerator GetEnumerator()
+    {
+      if (myList != null)
+      {
+        if (myList.IsFrozen) ThrowResultObtained();
+
+        return new ElementEnumerator(myList, myCount);
+      }
+
+      return new ElementEnumerator(FrozenEmpty, 0);
+    }
 
     [Serializable, StructLayout(LayoutKind.Auto)]
     public struct ElementEnumerator
@@ -720,6 +726,9 @@ namespace JetBrains.Util
       }
     }
 
+    #endregion
+    #region Throw helpers
+
     // note: those methods extracted to avoid complex control flow in methods preventing inlining
 
     [ContractAnnotation("=> halt")]
@@ -752,6 +761,9 @@ namespace JetBrains.Util
       throw new InvalidOperationException("More than single item in LocalList2");
     }
 
+    #endregion
+
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public bool AllFreeSlotsAreClear()
     {
       if (myList == null) return true;
@@ -765,6 +777,9 @@ namespace JetBrains.Util
 
       return true;
     }
+
+    private static FixedList.Builder<T> Empty = new FixedList.ListOf4<T>();
+    private static FixedList.Builder<T> FrozenEmpty = new FixedList.ListOf4<T> { CountAndIterationData = 0 };
   }
 
   internal class LocalList2DebugView<T>

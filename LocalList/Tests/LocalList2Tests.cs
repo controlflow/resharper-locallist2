@@ -92,7 +92,6 @@ namespace JetBrains.Util.Tests
       }
     }
 
-    // todo: indexer setter tests
     [Test]
     public void AddCountIndexer()
     {
@@ -289,6 +288,28 @@ namespace JetBrains.Util.Tests
 
         foreach (var item in list.ReadOnlyList())
           Assert.AreEqual(item, 42);
+      }
+    }
+
+    [Test]
+    public void ToArray()
+    {
+      foreach (var list in CreateVariousFilledLocalLists())
+      {
+        var array = list.ToArray();
+
+        Assert.AreEqual(list.Count, array.Length);
+
+        Assert.Throws<InvalidOperationException>(() => _ = list.ToArray());
+        Assert.Throws<InvalidOperationException>(() => _ = list.ResultingList());
+        Assert.Throws<InvalidOperationException>(() => _ = list.ReadOnlyList());
+        Assert.Throws<InvalidOperationException>(() => list.Add(42));
+        Assert.Throws<InvalidOperationException>(() => _ = list[0]);
+
+        for (var index = 0; index < array.Length; index++)
+        {
+          Assert.AreEqual(index + 1, array[index]);
+        }
       }
     }
 
