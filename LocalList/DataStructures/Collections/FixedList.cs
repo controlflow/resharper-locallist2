@@ -122,7 +122,25 @@ namespace JetBrains.Util.DataStructures.Collections
       [CanBeNull]
       public abstract Builder<T> TrimExcess(int count, bool clone);
 
-      protected abstract void CopyToImpl([NotNull] T[] array, int arrayIndex);
+      public virtual void CopyToImpl([NotNull] T[] array, int arrayIndex, int count)
+      {
+        for (var index = 0; index < count; index++)
+        {
+          array[arrayIndex + index] = ItemRefNoRangeCheck(index);
+        }
+      }
+
+      public virtual void CopyToImpl([NotNull] Builder<T> other, int count)
+      {
+        Debug.Assert(!IsFrozen);
+
+        other.CountAndIterationData = CountAndIterationData;
+
+        for (var index = 0; index < count; index++)
+        {
+          other.ItemRefNoRangeCheck(index) = ItemRefNoRangeCheck(index);
+        }
+      }
 
       #region Read access
 
@@ -147,7 +165,10 @@ namespace JetBrains.Util.DataStructures.Collections
         return -1;
       }
 
-      public bool Contains(T item) => IndexOf(item, Count) >= 0;
+      public bool Contains(T item)
+      {
+        return IndexOf(item, Count) >= 0;
+      }
 
       public void CopyTo(T[] array, int arrayIndex)
       {
@@ -155,10 +176,12 @@ namespace JetBrains.Util.DataStructures.Collections
           throw new ArgumentNullException(nameof(array));
         if (arrayIndex < 0)
           throw new ArgumentOutOfRangeException(nameof(arrayIndex));
-        if (arrayIndex + Count > array.Length)
-          throw new ArgumentOutOfRangeException(nameof(arrayIndex));
 
-        CopyToImpl(array, arrayIndex);
+        var count = Count;
+        if (arrayIndex + count > array.Length)
+          throw new ArgumentException("The number of items is greater than the available array space");
+
+        CopyToImpl(array, arrayIndex, count);
       }
 
       #endregion
@@ -440,11 +463,6 @@ namespace JetBrains.Util.DataStructures.Collections
 
         Item0 = default;
       }
-
-      protected override void CopyToImpl(T[] array, int arrayIndex)
-      {
-        if (ShortCount == 1) array[arrayIndex] = Item0;
-      }
     }
 
     internal sealed class ListOf2<T> : FixedBuilder<T>
@@ -549,20 +567,6 @@ namespace JetBrains.Util.DataStructures.Collections
         if (indexToRemove < 1) Item0 = Item1;
 
         Item1 = default;
-      }
-
-      protected override void CopyToImpl(T[] array, int arrayIndex)
-      {
-        var count = ShortCount;
-        if (count > 0)
-        {
-          array[arrayIndex++] = Item0;
-
-          if (count > 1)
-          {
-            array[arrayIndex] = Item1;
-          }
-        }
       }
     }
 
@@ -684,25 +688,6 @@ namespace JetBrains.Util.DataStructures.Collections
         if (indexToRemove < 2) Item1 = Item2;
 
         Item2 = default;
-      }
-
-      protected override void CopyToImpl(T[] array, int arrayIndex)
-      {
-        var count = ShortCount;
-        if (count > 0)
-        {
-          array[arrayIndex++] = Item0;
-
-          if (count > 1)
-          {
-            array[arrayIndex++] = Item1;
-
-            if (count > 2)
-            {
-              array[arrayIndex] = Item2;
-            }
-          }
-        }
       }
     }
 
@@ -839,30 +824,6 @@ namespace JetBrains.Util.DataStructures.Collections
 
         Item3 = default;
       }
-
-      protected override void CopyToImpl(T[] array, int arrayIndex)
-      {
-        var count = ShortCount;
-        if (count > 0)
-        {
-          array[arrayIndex++] = Item0;
-
-          if (count > 1)
-          {
-            array[arrayIndex++] = Item1;
-
-            if (count > 2)
-            {
-              array[arrayIndex++] = Item2;
-
-              if (count > 3)
-              {
-                array[arrayIndex] = Item3;
-              }
-            }
-          }
-        }
-      }
     }
 
     internal sealed class ListOf8<T> : FixedBuilder<T>
@@ -964,7 +925,17 @@ namespace JetBrains.Util.DataStructures.Collections
           case 1: return new ListOf1<T> { Item0 = Item0};
           case 2: return new ListOf2<T> { Item0 = Item0, Item1 = Item1 };
           case 3: return new ListOf3<T> { Item0 = Item0, Item1 = Item1, Item2 = Item2 };
-          case 4: return new ListOf4<T> { Item0 = Item0, Item1 = Item1, Item2 = Item2, Item3 = Item3};
+          case 4: return new ListOf4<T> { Item0 = Item0, Item1 = Item1, Item2 = Item2, Item3 = Item3 };
+
+          case 5:
+          case 6:
+          case 7:
+          {
+            var array = new T[count];
+            CopyToImpl(array, arrayIndex: 0, count);
+            return new ListOfArray<T>(array, count) { CountAndIterationData = NotFrozenBit };
+          }
+
           default: return clone ? Clone(count) : this;
         }
       }
@@ -1005,50 +976,6 @@ namespace JetBrains.Util.DataStructures.Collections
         if (indexToRemove < 7) Item6 = Item7;
 
         Item7 = default;
-      }
-
-      protected override void CopyToImpl(T[] array, int arrayIndex)
-      {
-        var count = ShortCount;
-        if (count > 0)
-        {
-          array[arrayIndex++] = Item0;
-
-          if (count > 1)
-          {
-            array[arrayIndex++] = Item1;
-
-            if (count > 2)
-            {
-              array[arrayIndex++] = Item2;
-
-              if (count > 3)
-              {
-                array[arrayIndex++] = Item3;
-
-                if (count > 4)
-                {
-                  array[arrayIndex++] = Item4;
-
-                  if (count > 5)
-                  {
-                    array[arrayIndex++] = Item5;
-
-                    if (count > 6)
-                    {
-                      array[arrayIndex++] = Item6;
-
-                      if (count > 7)
-                      {
-                        array[arrayIndex] = Item7;
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
       }
     }
 
@@ -1127,7 +1054,16 @@ namespace JetBrains.Util.DataStructures.Collections
           case 2: return new ListOf2<T> { Item0 = myArray[0], Item1 = myArray[1] };
           case 3: return new ListOf3<T> { Item0 = myArray[0], Item1 = myArray[1], Item2 = myArray[2] };
           case 4: return new ListOf4<T> { Item0 = myArray[0], Item1 = myArray[1], Item2 = myArray[2], Item3 = myArray[3] };
-          default: return clone ? Clone(count) : this;
+
+          default:
+          {
+            if (count == myArray.Length)
+              return clone ? Clone(count) : this;
+
+            var newArray = new T[count];
+            Array.Copy(myArray, newArray, count);
+            return new ListOfArray<T>(newArray, count) { CountAndIterationData = NotFrozenBit };
+          }
         }
       }
 
@@ -1163,9 +1099,33 @@ namespace JetBrains.Util.DataStructures.Collections
         CountAndIterationData = BeforeGetEnumerator; // todo: FIX this
       }
 
-      protected override void CopyToImpl(T[] array, int arrayIndex)
+      public override void CopyToImpl(T[] array, int arrayIndex, int count)
       {
-        throw new NotImplementedException();
+        Array.Copy(
+          sourceArray: myArray,
+          sourceIndex: 0,
+          destinationArray: array,
+          destinationIndex: arrayIndex,
+          length: count);
+      }
+
+      public override void CopyToImpl(Builder<T> other, int count)
+      {
+        Debug.Assert(!IsFrozen);
+
+        other.CountAndIterationData = CountAndIterationData;
+
+        if (other is ListOfArray<T> otherArray)
+        {
+          Array.Copy(myArray, otherArray.myArray, count);
+        }
+        else
+        {
+          for (var index = 0; index < count; index++)
+          {
+            other.ItemRefNoRangeCheck(index) = myArray[index];
+          }
+        }
       }
 
       public override T this[int index]

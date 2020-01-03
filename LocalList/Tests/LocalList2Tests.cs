@@ -11,9 +11,6 @@ using NUnit.Framework;
 
 namespace JetBrains.Util.Tests
 {
-  // todo: test version overflows
-  // todo: test version increment at enlargement
-
   [TestFixture]
   public sealed class LocalList2Tests
   {
@@ -45,11 +42,7 @@ namespace JetBrains.Util.Tests
           var list = new LocalList2<int>(capacity: capacity, forceArray);
 
           Assert.AreEqual(0, list.Count);
-
-          if (forceArray)
-            Assert.AreEqual(capacity, list.Capacity);
-          else
-            Assert.LessOrEqual(capacity, list.Capacity);
+          Assert.AreEqual(capacity, list.Capacity);
         }
       }
     }
@@ -101,7 +94,7 @@ namespace JetBrains.Util.Tests
 
     // todo: indexer setter tests
     [Test]
-    public void AddCountIndex()
+    public void AddCountIndexer()
     {
       foreach (var count in CapacitiesToTest.Concat(new[] { 70000 }))
       {
@@ -508,51 +501,138 @@ namespace JetBrains.Util.Tests
     [Test]
     public void CapacityManagement()
     {
-      foreach (var list in CreateVariousFilledLocalLists())
+      foreach (var list1 in CreateVariousFilledLocalLists())
       {
+        var list = list1; // make mutable variable
+
         var oldCapacity = list.Capacity;
         var countBefore = list.Count;
         var enumeratorBefore = list.GetEnumerator();
 
         list.TrimExcess();
-
-        Assert.IsTrue(list.AllFreeSlotsAreClear());
-
-        for (var index = 0; index < list.Count; index++)
-        {
-          Assert.AreEqual(list[index], index + 1);
-        }
+        VerifyListData();
 
         Assert.LessOrEqual(list.Capacity, oldCapacity);
-        Assert.LessOrEqual(list.Count, list.Capacity);
-        Assert.AreEqual(countBefore, list.Count);
-        Assert.DoesNotThrow(() => enumeratorBefore.MoveNext());
+        Assert.AreEqual(list.Count, list.Capacity);
+        Assert.DoesNotThrow(() => enumeratorBefore.MoveNext()); // todo: why do not throws?
 
         var enumeratorBefore2 = list.GetEnumerator();
 
         list.EnsureCapacity(oldCapacity);
+        VerifyListData();
 
-        Assert.AreEqual(oldCapacity, list.Capacity);
-        Assert.AreEqual(countBefore, list.Count);
+        Assert.LessOrEqual(oldCapacity, list.Capacity); // resizes up to max(2x, new capacity)
         Assert.DoesNotThrow(() => enumeratorBefore2.MoveNext());
 
         list.EnsureCapacity(0);
-        Assert.AreEqual(oldCapacity, list.Capacity);
+        VerifyListData();
 
-        for (var index = 0; index < list.Count; index++)
-        {
-          Assert.AreEqual(list[index], index + 1);
-        }
+        Assert.LessOrEqual(oldCapacity, list.Capacity);
+
+        list.EnsureCapacity(oldCapacity + 3);
+        VerifyListData();
+
+        Assert.LessOrEqual(oldCapacity + 3, list.Capacity);
+
+        VerifyListData();
+
+        var enumeratorBefore3 = list.GetEnumerator();
+        list.Capacity = countBefore;
+        Assert.AreEqual(list.Count, list.Capacity);
+        Assert.DoesNotThrow(() => enumeratorBefore3.MoveNext());
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => list.Capacity = list.Count - 1);
 
         _ = list.ResultingList();
 
         Assert.Throws<InvalidOperationException>(() => list.TrimExcess());
         Assert.Throws<InvalidOperationException>(() => list.EnsureCapacity(0));
+        Assert.Throws<InvalidOperationException>(() => list.Capacity = oldCapacity);
+
+        void VerifyListData()
+        {
+          Assert.AreEqual(countBefore, list.Count);
+
+          for (var index = 0; index < list.Count; index++)
+          {
+            Assert.AreEqual(index + 1, list[index]);
+          }
+
+          Assert.IsTrue(list.AllFreeSlotsAreClear());
+        }
       }
     }
 
-    // todo: CopyTo()
+    [Test]
+    public void CopyTo()
+    {
+      foreach (var list in CreateVariousFilledLocalLists())
+      {
+        const int indexDelta = 42;
+        var array = new int[list.Count];
+        var array2 = new int[list.Count + indexDelta];
+
+        // ReSharper disable once AssignNullToNotNullAttribute
+        Assert.Throws<ArgumentNullException>(() => list.CopyTo(array: null, arrayIndex: 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => list.CopyTo(array, arrayIndex: -1));
+        Assert.Throws<ArgumentException>(() => list.CopyTo(array, arrayIndex: 1));
+
+        if (list.Count > 0)
+          Assert.Throws<ArgumentException>(() => list.CopyTo(array, arrayIndex: list.Count));
+        else
+          Assert.DoesNotThrow(() => list.CopyTo(array, arrayIndex: list.Count));
+
+        var enumeratorBefore = list.GetEnumerator();
+
+        list.CopyTo(array, arrayIndex: 0);
+        list.CopyTo(array2, arrayIndex: indexDelta);
+
+        Assert.DoesNotThrow(() => enumeratorBefore.MoveNext());
+
+        VerifyArrays();
+
+        var resultingList = list.ResultingList();
+
+        Assert.Throws<InvalidOperationException>(() => list.CopyTo(array, arrayIndex: 0));
+
+        resultingList.CopyTo(array, arrayIndex: 0);
+        resultingList.CopyTo(array2, arrayIndex: indexDelta);
+
+        VerifyArrays();
+
+        // ReSharper disable once AssignNullToNotNullAttribute
+        Assert.Throws<ArgumentNullException>(() => resultingList.CopyTo(array: null, arrayIndex: 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => resultingList.CopyTo(array, arrayIndex: -1));
+        Assert.Catch<ArgumentException>(() => resultingList.CopyTo(array, arrayIndex: 1));
+
+        if (list.Count > 0)
+          Assert.Catch<ArgumentException>(() => resultingList.CopyTo(array, arrayIndex: list.Count));
+        else
+          Assert.DoesNotThrow(() => resultingList.CopyTo(array, arrayIndex: list.Count));
+
+        void VerifyArrays()
+        {
+          for (var index = 0; index < array.Length; index++)
+            Assert.AreEqual(index + 1, array[index]);
+
+          for (var index = 0; index < indexDelta; index++)
+            Assert.AreEqual(0, array2[index]);
+
+          for (var index = indexDelta; index < array2.Length; index++)
+            Assert.AreEqual(index + 1 - indexDelta, array2[index]);
+        }
+      }
+    }
+
+    [Test]
+    public void AddRange()
+    {
+      //var list = new LocalList2<string>();
+      //list.AddRange();
+    }
+
     // todo: Insert()
+    // todo: InsertRange()
     // todo: AddRange()
     // todo: ToString()
 
@@ -584,11 +664,13 @@ namespace JetBrains.Util.Tests
       // some special cases
       yield return new LocalList2<int>(capacity: 1, forceUseArray: true);
 
-      var largeCapacity = ushort.MaxValue * 2;
+      const int largeCapacity = ushort.MaxValue * 2;
       yield return new LocalList2<int>(largeCapacity);
 
       var largeList2 = new LocalList2<int>(largeCapacity);
-      for (var index = 1; index <= largeList2.Capacity / 2; index++)
+      var largeCount = largeList2.Capacity / 2 + 100;
+
+      for (var index = 1; index <= largeCount; index++)
       {
         largeList2.Add(index);
       }

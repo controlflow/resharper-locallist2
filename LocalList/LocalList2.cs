@@ -18,6 +18,7 @@ namespace JetBrains.Util
   // todo: check enumeration
   // todo: annotate methods readonly
   // todo: must modify version on enlarge
+  // todo: debug presentation after result is obtained
 
   /// <summary>
   /// Represents collection of items that doesn't create heap objects unless items are added
@@ -30,15 +31,11 @@ namespace JetBrains.Util
   [PublicAPI]
   public struct LocalList2<T>
   {
-    private const int DefaultFirstSize = 4;
-
     [CanBeNull] private FixedList.Builder<T> myList;
     private int myCount;
 
-
     // todo: to be removed
     [Obsolete] private static T[] myArray;
-    [Obsolete] private static int myNextSize;
     [Obsolete] private static int myVersion;
 
     #region Constructors
@@ -77,7 +74,7 @@ namespace JetBrains.Util
         myList = CreateBuilderWithCapacity(capacity);
     }
 
-    // todo: ctors
+    // todo: other ctors
 
     public LocalList2([NotNull] IEnumerable<T> enumerable)
     {
@@ -109,8 +106,6 @@ namespace JetBrains.Util
     /// Gets the number of elements contained in the <see cref="LocalList2{T}"/>.
     /// </summary>
     public readonly int Count => myCount;
-
-    public readonly int Capacity => myList == null ? 0 : myList.Capacity;
 
     public readonly T this[int index]
     {
@@ -206,6 +201,24 @@ namespace JetBrains.Util
         myList.ModifyVersion();
         myList.Clear(myCount);
         myCount = 0;
+      }
+    }
+
+    public readonly void CopyTo([NotNull] T[] array, int arrayIndex)
+    {
+      if (array == null)
+        throw new ArgumentNullException(nameof(array));
+      if (arrayIndex < 0)
+        throw new ArgumentOutOfRangeException(nameof(arrayIndex));
+      if (arrayIndex + myCount > array.Length)
+        throw new ArgumentException(
+          $"The number of items in {nameof(LocalList2<int>)} is greater than the available array space");
+
+      if (myList != null)
+      {
+        if (myList.IsFrozen) ThrowResultObtained();
+
+        myList.CopyToImpl(array, arrayIndex, myCount);
       }
     }
 
@@ -365,47 +378,65 @@ namespace JetBrains.Util
     #endregion
     #region Capacity management
 
+    public int Capacity
+    {
+      readonly get => myList == null ? 0 : myList.Capacity;
+      set
+      {
+        if (value < myCount) ThrowOutOfRange();
+
+        if (myList != null && myList.IsFrozen) ThrowResultObtained();
+
+        if (value == Capacity) return;
+
+        // re-allocate storage
+        var newList = CreateBuilderWithCapacity(value);
+
+        if (myList != null && newList != null)
+        {
+          myList.CopyToImpl(newList, myCount);
+        }
+
+        myList = newList;
+      }
+    }
+
     public void EnsureCapacity(int capacity)
     {
       if (myList == null)
       {
         myList = CreateBuilderWithCapacity(capacity);
+        return;
       }
-      else
-      {
-        if (myList.IsFrozen) ThrowResultObtained();
 
-        if (capacity <= myList.Capacity) return;
+      if (myList.IsFrozen) ThrowResultObtained();
 
-        var newList = CreateBuilderWithCapacity(capacity);
-        Debug.Assert(newList != null);
+      var currentCapacity = myList.Capacity;
+      if (currentCapacity >= capacity) return;
 
-        for (var index = 0; index < myCount; index++)
-        {
-          newList.ItemRefNoRangeCheck(index) = myList.ItemRefNoRangeCheck(index);
-        }
+      var newCapacity = Math.Max(currentCapacity * 2, capacity);
 
-        newList.CountAndIterationData = myList.CountAndIterationData;
-        myList = newList;
-      }
+      var newList = CreateBuilderWithCapacity(newCapacity);
+      Debug.Assert(newList != null);
+
+      myList.CopyToImpl(newList, myCount);
+
+      myList = newList;
     }
 
     [Pure, CanBeNull]
     private static FixedList.Builder<T> CreateBuilderWithCapacity(int capacity)
     {
-      switch (capacity)
+      return capacity switch
       {
-        case 0: return null;
-        case 1: return new FixedList.ListOf1<T>();
-        case 2: return new FixedList.ListOf2<T>();
-        case 3: return new FixedList.ListOf3<T>();
-        case 4: return new FixedList.ListOf4<T>();
-        case 5:
-        case 6:
-        case 7:
-        case 8: return new FixedList.ListOf8<T>();
-        default: return new FixedList.ListOfArray<T>(capacity);
-      }
+        0 => null,
+        1 => new FixedList.ListOf1<T>(),
+        2 => new FixedList.ListOf2<T>(),
+        3 => new FixedList.ListOf3<T>(),
+        4 => new FixedList.ListOf4<T>(),
+        8 => new FixedList.ListOf8<T>(),
+        _ => new FixedList.ListOfArray<T>(capacity)
+      };
     }
 
     public void TrimExcess()
@@ -413,14 +444,18 @@ namespace JetBrains.Util
       if (myList == null) return;
       if (myList.IsFrozen) ThrowResultObtained();
 
-      myList = myList.TrimExcess(myCount, false);
+      var trimmedList = myList.TrimExcess(myCount, clone: false);
+      if (trimmedList != null)
+      {
+        trimmedList.CountAndIterationData = myList.CountAndIterationData;
+      }
+
+      myList = trimmedList;
     }
 
     #endregion
 
-
-    public void AddRange<TSource>([NotNull] IEnumerable<TSource> items)
-      where TSource : T
+    public void AddRange([NotNull] IEnumerable<T> items)
     {
       if (items is ICollection<T> collection)
       {
@@ -428,11 +463,21 @@ namespace JetBrains.Util
         return;
       }
 
+      if (myList != null)
+      {
+        if (myList.IsFrozen) ThrowResultObtained();
+
+
+      }
+
+
+
       if (myVersion == -1) ThrowResultObtained();
 
       var itemsCount = items.TryGetCountFast();
       if (itemsCount > 0)
       {
+        // todo: exact?
         EnsureCapacity(myCount + itemsCount);
       }
 
@@ -442,24 +487,12 @@ namespace JetBrains.Util
       }
     }
 
-    public void AddRange([NotNull] IEnumerable<T> items)
-    {
-      AddRange<T>(items);
-    }
-
     public void AddRange(in LocalList2<T> items)
     {
       //AddRange(items.myArray, items.myCount);
     }
 
-    public void AddRange<TSource>([NotNull] TSource[] items)
-      where TSource : T
-    {
-      AddRange(items, items.Length);
-    }
-
-    private void AddRange<TSource>([NotNull] TSource[] items, int length)
-      where TSource : T
+    private void AddRange([NotNull] T[] items, int length)
     {
       if (myVersion == -1) ThrowResultObtained();
 
@@ -501,33 +534,8 @@ namespace JetBrains.Util
       return array;
     }
 
-    [Pure, NotNull]
-    public TResult[] ToArray<TResult>([NotNull, InstantHandle] Func<T, TResult> transform)
-    {
-      if (myVersion == -1) ThrowResultObtained();
 
-      if (myArray == null | myCount == 0)
-        return EmptyArray<TResult>.Instance;
 
-      var array = new TResult[myCount];
-      for (var index = 0; index < myCount; index++)
-      {
-        array[index] = transform(myArray[index]);
-      }
-
-      return array;
-    }
-
-    public void CopyTo([NotNull] T[] array, int arrayIndex)
-    {
-      // note: we do this check here because users can already
-      //       mutate the elements in obtained array
-      if (myVersion == -1) ThrowResultObtained();
-
-      if (myArray == null) return;
-
-      Array.Copy(myArray, 0, array, arrayIndex, myCount);
-    }
 
 
 
@@ -553,7 +561,7 @@ namespace JetBrains.Util
 
       if (atIndex == myCount && startingFrom == 0)
       {
-        AddRange(items, length);
+        //AddRange(items, length);
         return;
       }
 
@@ -599,8 +607,7 @@ namespace JetBrains.Util
       {
         // No free space, reallocate the array and copy items
         // Array grows with Fibonacci speed, not exponential
-        var newArray = new T[myNextSize];
-        myNextSize += myArray.Length;
+        var newArray = new T[myCount * 2];
         Array.Copy(myArray, newArray, index);
         Array.Copy(myArray, index, newArray, index + 1, myCount - index);
         myArray = newArray;
@@ -684,7 +691,7 @@ namespace JetBrains.Util
     [Serializable, StructLayout(LayoutKind.Auto)]
     public struct ElementEnumerator
     {
-      private readonly FixedList.Builder<T> myBuilder;
+      [NotNull] private readonly FixedList.Builder<T> myBuilder;
       private readonly int myVersion;
       private int myIndex, myCount;
 
