@@ -728,7 +728,16 @@ namespace JetBrains.Util.Tests
     [Test]
     public void InsertRange()
     {
+      var random = new Random();
 
+      foreach (var list in CreateVariousFilledLocalLists())
+      {
+        var insertIndex = random.Next(0, list.Count);
+
+
+
+        //list.InsertRange(insertIndex, Enumerable.Repeat(0, 3));
+      }
     }
 
     [Test]

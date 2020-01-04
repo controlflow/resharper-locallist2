@@ -13,13 +13,7 @@ using JetBrains.Util.DataStructures.Collections;
 // ReSharper disable once CheckNamespace
 namespace JetBrains.Util
 {
-  // NOTE: [downside] may allocate array instead of returning internal one
-  // todo: check with 65636 'byte' items
-  // todo: check indexer
-  // todo: check enumeration
   // todo: annotate methods readonly
-  // todo: must modify version on enlarge
-  // todo: debug presentation after result is obtained
 
   /// <summary>
   /// Represents collection of items that doesn't create heap objects unless items are added
@@ -35,9 +29,7 @@ namespace JetBrains.Util
     [CanBeNull] private FixedList.Builder<T> myList;
     private int myCount;
 
-    // todo: to be removed
-    [Obsolete] private static T[] myArray;
-    [Obsolete] private static int myVersion;
+    private static FixedList.Builder<T> FrozenEmpty = new FixedList.ListOf4<T> { CountAndIterationData = 0 };
 
     #region Constructors
 
@@ -77,6 +69,9 @@ namespace JetBrains.Util
 
     public LocalList2([NotNull] IEnumerable<T> enumerable)
     {
+      if (enumerable == null)
+        throw new ArgumentNullException(nameof(enumerable));
+
       myList = null;
       myCount = 0;
       AddRange(enumerable);
@@ -272,68 +267,12 @@ namespace JetBrains.Util
 
     public void AddRange([NotNull] IEnumerable<T> items)
     {
-      if (items is ICollection<T> collection)
-      {
-        AddRange(collection);
-        return;
-      }
-
-      if (myList != null)
-      {
-        if (myList.IsFrozen) ThrowResultObtained();
-
-        myList.ModifyVersion();
-      }
-
-      foreach (var item in items)
-      {
-        if (myList == null)
-          myList = new FixedList.ListOf4<T>();
-
-        myList.Append(in item, myCount++, ref myList);
-      }
+      InsertRange(index: 0, items);
     }
 
     public void AddRange([NotNull] ICollection<T> collection)
     {
-      if (myList != null)
-      {
-        if (myList.IsFrozen) ThrowResultObtained();
-
-        myList.ModifyVersion(); // modify before EnsureCapacity()
-      }
-
-      var collectionCount = collection.Count;
-      if (collectionCount == 0) return; // do nothing
-
-      EnsureCapacity(myCount + collectionCount);
-
-      Assertion.Assert(myList != null);
-
-      if (myList.TryGetInternalArray() is { } internalArray)
-      {
-        // directly copy to internal array
-        collection.CopyTo(internalArray, arrayIndex: myCount);
-        myCount += collectionCount;
-      }
-      else if (collection is IList<T> list)
-      {
-        // avoid using IEnumerable<T> if possible, since it's likely
-        // IEnumerator allocation + many interface calls
-        for (var index = 0; index < collectionCount; index++)
-        {
-          myList.ItemRefNoRangeCheck(index) = list[index];
-        }
-
-        myCount += collectionCount;
-      }
-      else
-      {
-        foreach (var item in collection)
-        {
-          myList.Append(in item, myCount++, ref myList);
-        }
-      }
+      InsertRange(index: myCount, collection);
     }
 
     public void AddRange(in LocalList2<T> list)
@@ -359,6 +298,81 @@ namespace JetBrains.Util
       {
         otherList.CopyToImpl(myList, startIndex: myCount, otherCount);
         myCount += otherCount;
+      }
+    }
+
+    public void InsertRange(int index, [NotNull] IEnumerable<T> items)
+    {
+      if (index < 0 || index > myCount)
+        throw new ArgumentOutOfRangeException(
+          nameof(index), "Index should be non-negative and less or equal than Count");
+      if (items == null)
+        throw new ArgumentNullException(nameof(items));
+
+      if (items is ICollection<T> collection)
+      {
+        InsertRange(index, collection);
+        return;
+      }
+
+      if (myList != null)
+      {
+        if (myList.IsFrozen) ThrowResultObtained();
+
+        myList.ModifyVersion();
+      }
+
+      foreach (var item in items)
+      {
+        if (myList == null)
+          myList = new FixedList.ListOf4<T>();
+
+        myList.Append(in item, myCount++, ref myList);
+      }
+    }
+
+    public void InsertRange(int index, [NotNull] ICollection<T> collection)
+    {
+      if (collection == null)
+        throw new ArgumentNullException(nameof(collection));
+
+      if (myList != null)
+      {
+        if (myList.IsFrozen) ThrowResultObtained();
+
+        myList.ModifyVersion(); // modify before EnsureCapacity()
+      }
+
+      var collectionCount = collection.Count;
+      if (collectionCount == 0) return; // do nothing
+
+      EnsureCapacity(myCount + collectionCount);
+
+      Assertion.Assert(myList != null);
+
+      if (myList.TryGetInternalArray() is { } internalArray)
+      {
+        // directly copy to internal array
+        collection.CopyTo(internalArray, arrayIndex: myCount);
+        myCount += collectionCount;
+      }
+      else if (collection is IList<T> list)
+      {
+        // avoid using IEnumerable<T> if possible, since it's likely
+        // IEnumerator allocation + many interface calls
+        for (var index1 = 0; index1 < collectionCount; index1++)
+        {
+          myList.ItemRefNoRangeCheck(index1) = list[index1];
+        }
+
+        myCount += collectionCount;
+      }
+      else
+      {
+        foreach (var item in collection)
+        {
+          myList.ItemRefNoRangeCheck(myCount++) = item;
+        }
       }
     }
 
@@ -564,92 +578,6 @@ namespace JetBrains.Util
     }
 
     #endregion
-
-
-
-
-    public void InsertRange(int index, in LocalList2<T> items)
-    {
-      InsertRange(index, myArray, myCount);
-    }
-
-    public void InsertRange<TSource>(int atIndex, [NotNull] TSource[] items, int startingFrom = 0, int length = -1)
-      where TSource : T
-    {
-      if (length == -1)
-        length = items.Length - startingFrom;
-
-      if (myVersion == -1) ThrowResultObtained();
-
-      if (length == 0)
-        return;
-
-      if ((uint)atIndex > (uint)myCount) ThrowOutOfRange();
-
-      if (atIndex == myCount && startingFrom == 0)
-      {
-        //AddRange(items, length);
-        return;
-      }
-
-      if (myArray == null)
-      {
-        Assertion.Assert(atIndex == 0, "atIndex == 0");
-        var newSize = 42;
-        var newArray = new T[newSize];
-        myArray = newArray;
-      }
-      else if (myCount + length > myArray.Length)
-      {
-        // No free space, reallocate the array and copy items
-        // Array grows with Fibonacci speed, not exponential
-        var newSize = 42;
-        var newArray = new T[newSize];
-        Array.Copy(myArray, newArray, atIndex);
-        Array.Copy(myArray, atIndex, newArray, atIndex + length, myCount - atIndex);
-        myArray = newArray;
-      }
-      else
-      {
-        Array.Copy(myArray, atIndex, myArray, atIndex + length, myCount - atIndex);
-      }
-
-      Array.Copy(items, startingFrom, myArray, atIndex, length);
-      myCount += length;
-      myVersion++;
-    }
-
-    public void Insert(int index, T item)
-    {
-      if (myVersion == -1) ThrowResultObtained();
-      if ((uint)index > (uint)myCount) ThrowOutOfRange();
-
-      if (index == myCount)
-      {
-        Add(item);
-        return;
-      }
-
-      if (myCount == myArray.Length)
-      {
-        // No free space, reallocate the array and copy items
-        // Array grows with Fibonacci speed, not exponential
-        var newArray = new T[myCount * 2];
-        Array.Copy(myArray, newArray, index);
-        Array.Copy(myArray, index, newArray, index + 1, myCount - index);
-        myArray = newArray;
-      }
-      else
-      {
-        Array.Copy(myArray, index, myArray, index + 1, myCount - index);
-      }
-
-      myArray[index] = item;
-      myCount++;
-      myVersion++;
-    }
-
-
     #region Sorting
 
     public void UnstableSort()
@@ -790,6 +718,7 @@ namespace JetBrains.Util
     }
 
     #endregion
+    #region Debug & presentation
 
     [Pure, NotNull]
     public override readonly string ToString()
@@ -811,21 +740,6 @@ namespace JetBrains.Util
       return builder.Append("]").ToString();
     }
 
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public bool AllFreeSlotsAreClear()
-    {
-      if (myList == null) return true;
-
-      for (int index = myCount, capacity = myList.Capacity; index < capacity; index++)
-      {
-        var item = myList.ItemRefNoRangeCheck(index);
-        if (!EqualityComparer<T>.Default.Equals(item, default))
-          return false;
-      }
-
-      return true;
-    }
-
     [MustUseReturnValue, NotNull]
     internal readonly T[] ToDebugArray()
     {
@@ -845,8 +759,22 @@ namespace JetBrains.Util
       return newArray;
     }
 
-    private static FixedList.Builder<T> Empty = new FixedList.ListOf4<T>();
-    private static FixedList.Builder<T> FrozenEmpty = new FixedList.ListOf4<T> { CountAndIterationData = 0 };
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public bool AllFreeSlotsAreClear()
+    {
+      if (myList == null) return true;
+
+      for (int index = myCount, capacity = myList.Capacity; index < capacity; index++)
+      {
+        var item = myList.ItemRefNoRangeCheck(index);
+        if (!EqualityComparer<T>.Default.Equals(item, default))
+          return false;
+      }
+
+      return true;
+    }
+
+    #endregion
   }
 
   internal class LocalList2DebugView<T>
