@@ -163,6 +163,32 @@ namespace JetBrains.Util
       }
     }
 
+    public void Reverse()
+    {
+      Reverse(startIndex: 0, length: myCount);
+    }
+
+    public void Reverse(int startIndex, int length)
+    {
+      if (startIndex < 0)
+        throw new ArgumentOutOfRangeException(
+          nameof(startIndex), "Index should be non-negative and less then Count");
+      if (length < 0)
+        throw new ArgumentOutOfRangeException(nameof(length), "Length should be non-negative");
+      if (startIndex + length > myCount)
+        throw new ArgumentException("Index plus length is beyond list's items Count");
+
+      if (myList == null) return;
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      myList.ModifyVersion();
+
+      if (myCount > 1)
+      {
+        myList.Reverse(startIndex: 0, length: myCount);
+      }
+    }
+
     [Pure]
     public readonly int IndexOf(T item)
     {
@@ -305,7 +331,7 @@ namespace JetBrains.Util
     {
       if (index < 0 || index > myCount)
         throw new ArgumentOutOfRangeException(
-          nameof(index), "Index should be non-negative and less or equal than Count");
+          nameof(index), "Index should be non-negative and less then or equal to Count");
       if (items == null)
         throw new ArgumentNullException(nameof(items));
 
@@ -322,6 +348,9 @@ namespace JetBrains.Util
         myList.ModifyVersion();
       }
 
+      // if index is != 0, just append items to the tail first
+      var shift = myCount - index;
+
       foreach (var item in items)
       {
         if (myList == null)
@@ -329,6 +358,14 @@ namespace JetBrains.Util
 
         myList.Append(in item, myCount++, ref myList);
       }
+
+      // and later rotate them
+      if (shift > 0)
+      {
+        // rotation through
+      }
+
+      // todo: rotation
     }
 
     public void InsertRange(int index, [NotNull] ICollection<T> collection)

@@ -725,7 +725,7 @@ namespace JetBrains.Util.Tests
 
     }
 
-
+// todo: insert
     [Test]
     public void InsertRange()
     {
@@ -755,6 +755,42 @@ namespace JetBrains.Util.Tests
           Assert.AreEqual(expected++, list[index]);
 
           if (expected == 0) expected++;
+        }
+      }
+    }
+
+    [Test]
+    public void Reverse()
+    {
+      foreach (var list in CreateVariousFilledLocalLists())
+      {
+        var countBefore = list.Count;
+        var enumerator = list.GetEnumerator();
+
+        list.Reverse();
+
+        AssertReversed();
+
+        if (countBefore > 0)
+          Assert.Throws<InvalidOperationException>(() => enumerator.MoveNext());
+
+        list.Reverse(startIndex: 0, length: list.Count);
+        list.Reverse();
+
+        AssertReversed();
+
+        _ = list.ResultingList();
+
+        Assert.Throws<InvalidOperationException>(() => list.Reverse());
+
+        void AssertReversed()
+        {
+          for (var index = 0; index < list.Count; index++)
+          {
+            Assert.AreEqual(list.Count - index, list[index]);
+          }
+
+          Assert.AreEqual(countBefore, list.Count);
         }
       }
     }

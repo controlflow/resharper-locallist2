@@ -108,26 +108,9 @@ namespace JetBrains.Util.DataStructures.Collections
       [CanBeNull]
       public abstract Builder<T> TrimExcess(int count, bool clone);
 
-      public virtual void CopyToImpl([NotNull] T[] array, int targetIndex, int length)
-      {
-        for (var index = 0; index < length; index++)
-        {
-          array[targetIndex + index] = ItemRefNoRangeCheck(index);
-        }
-      }
-
-      public virtual void CopyToImpl([NotNull] Builder<T> target, int targetIndex, int fromIndex, int length)
-      {
-        Assertion.Assert(!IsFrozen);
-
-        target.CountAndIterationData = CountAndIterationData;
-
-        // note: reverse order is important to CopyTo into self
-        for (var index = length - 1; index >= 0; index--)
-        {
-          target.ItemRefNoRangeCheck(targetIndex + index) = ItemRefNoRangeCheck(fromIndex + index);
-        }
-      }
+      public abstract void CopyToImpl([NotNull] T[] array, int targetIndex, int length);
+      public abstract void CopyToImpl([NotNull] Builder<T> target, int targetIndex, int fromIndex, int length);
+      public abstract void Reverse(int startIndex, int length);
 
       [ItemCanBeNull, Pure]
       public virtual T[] TryGetInternalArray() => null;
@@ -331,6 +314,47 @@ namespace JetBrains.Util.DataStructures.Collections
       object IEnumerator.Current => Current;
 
       #endregion
+
+      public sealed override void CopyToImpl(T[] array, int targetIndex, int length)
+      {
+        for (var index = 0; index < length; index++)
+        {
+          array[targetIndex + index] = ItemRefNoRangeCheck(index);
+        }
+      }
+
+      public sealed override void CopyToImpl(Builder<T> target, int targetIndex, int fromIndex, int length)
+      {
+        Assertion.Assert(!IsFrozen);
+
+        target.CountAndIterationData = CountAndIterationData;
+
+        // note: reverse order is important to CopyTo into self
+        for (var index = length - 1; index >= 0; index--)
+        {
+          target.ItemRefNoRangeCheck(targetIndex + index) = ItemRefNoRangeCheck(fromIndex + index);
+        }
+      }
+
+      public sealed override void Reverse(int startIndex, int length)
+      {
+        Debug.Assert(!IsFrozen);
+        Debug.Assert(startIndex >= 0);
+        Debug.Assert(length > 1);
+
+        var lastIndex = startIndex + length / 2;
+        var endIndex = startIndex + length - 1;
+
+        while (startIndex < lastIndex)
+        {
+          ref var left = ref ItemRefNoRangeCheck(startIndex++);
+          ref var right = ref ItemRefNoRangeCheck(endIndex--);
+
+          var copy = left;
+          left = right;
+          right = copy;
+        }
+      }
 
       public override void Sort(int startIndex, int length, IComparer<T> comparer)
       {
@@ -1152,6 +1176,15 @@ namespace JetBrains.Util.DataStructures.Collections
             target.ItemRefNoRangeCheck(targetIndex + index) = myArray[index];
           }
         }
+      }
+
+      public override void Reverse(int startIndex, int length)
+      {
+        Debug.Assert(!IsFrozen);
+        Debug.Assert(startIndex >= 0);
+        Debug.Assert(length > 1);
+
+        Array.Reverse(myArray, startIndex, length);
       }
 
       public override T[] TryGetInternalArray() => myArray;
