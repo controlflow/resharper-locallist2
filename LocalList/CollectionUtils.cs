@@ -31,14 +31,16 @@ namespace JetBrains.Util
   public static class Assertion
   {
     [Conditional("DEBUG")]
-    public static void Assert(bool condition)
+    [AssertionMethod]
+    public static void Assert([AssertionCondition(AssertionConditionType.IS_TRUE)] bool condition)
     {
       if (!condition)
         throw new Exception("Assertion failed");
     }
 
     [Conditional("DEBUG")]
-    public static void Assert(bool condition, [NotNull] string message)
+    [AssertionMethod]
+    public static void Assert([AssertionCondition(AssertionConditionType.IS_TRUE)] bool condition, [NotNull] string message)
     {
       if (!condition)
         throw new Exception($"Assertion failed: {message}");

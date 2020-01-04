@@ -842,7 +842,19 @@ namespace JetBrains.Util.Tests
       public int ComparisonCount;
     }
 
-    // todo: ToString()
+    [Test]
+    public new void ToString()
+    {
+      foreach (var list in CreateVariousFilledLocalLists())
+      {
+        var listText = list.ToString();
+        var expectedText = "[" + string.Join(", ", list.ResultingList()) + "]";
+
+        Assert.AreEqual(expectedText, listText);
+
+        Assert.Throws<InvalidOperationException>(() => _ = list.ToString());
+      }
+    }
 
     #region Test helpers
 

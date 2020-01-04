@@ -707,27 +707,6 @@ namespace JetBrains.Util
     }
 
     #endregion
-
-    public override readonly string ToString()
-    {
-      if (myList == null) return "[]";
-
-      //if (myList.IsFrozen) ThrowResultObtained();
-
-      var builder = new StringBuilder();
-      builder.Append("[");
-
-      for (var index = 0; index < myCount; index++)
-      {
-        builder.Append(myList.ItemRefNoRangeCheck(index));
-
-        if (index > 0)
-          builder.Append(", ");
-      }
-
-      return builder.Append("]").ToString();
-    }
-
     #region Enumeration
 
     [Pure]
@@ -811,6 +790,26 @@ namespace JetBrains.Util
     }
 
     #endregion
+
+    [Pure, NotNull]
+    public override readonly string ToString()
+    {
+      if (myList == null) return "[]";
+
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      var builder = new StringBuilder("[");
+
+      for (var index = 0; index < myCount; index++)
+      {
+        if (index > 0) builder.Append(", ");
+
+        var itemText = myList.ItemRefNoRangeCheck(index).ToString();
+        builder.Append(itemText);
+      }
+
+      return builder.Append("]").ToString();
+    }
 
     [EditorBrowsable(EditorBrowsableState.Never)]
     public bool AllFreeSlotsAreClear()
