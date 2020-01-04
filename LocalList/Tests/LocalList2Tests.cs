@@ -725,18 +725,37 @@ namespace JetBrains.Util.Tests
 
     }
 
+
     [Test]
     public void InsertRange()
     {
       var random = new Random();
 
+      Func<IEnumerable<int>, IEnumerable<int>>[] transformations =
+      {
+        //ts => ts,
+        ts => ts.ToList(),
+        ts => ts.ToHashSet(),
+      };
+
+      foreach (var transformation in transformations)
       foreach (var list in CreateVariousFilledLocalLists())
       {
         var insertIndex = random.Next(0, list.Count);
+        var tail = Enumerable.Range(list.Count + 1, 3);
 
+        list.InsertRange(index: insertIndex, transformation(Enumerable.Repeat(0, 3)));
+        list.InsertRange(index: 0, transformation(Enumerable.Range(0, 3).Select(x => x - 3)));
+        list.InsertRange(index: list.Count, transformation(tail));
 
+        for (int index = 0, expected = -3; index < list.Count; index++)
+        {
+          if (list[index] == 0) continue;
 
-        //list.InsertRange(insertIndex, Enumerable.Repeat(0, 3));
+          Assert.AreEqual(expected++, list[index]);
+
+          if (expected == 0) expected++;
+        }
       }
     }
 
@@ -790,6 +809,8 @@ namespace JetBrains.Util.Tests
 
             assertion(prev, next);
           }
+
+          list.AllFreeSlotsAreClear();
         }
       }
 

@@ -85,7 +85,6 @@ namespace JetBrains.Util.DataStructures.Collections
       }
     }
 
-    [DebuggerTypeProxy(typeof(BuilderDebugView<>))]
     internal abstract class Builder<T> : IReadOnlyList<T>, IList<T>
     {
       // note: this must be of `int` type to use `Interlocked.CompareExchange()`
@@ -109,23 +108,24 @@ namespace JetBrains.Util.DataStructures.Collections
       [CanBeNull]
       public abstract Builder<T> TrimExcess(int count, bool clone);
 
-      public virtual void CopyToImpl([NotNull] T[] array, int startIndex, int count)
+      public virtual void CopyToImpl([NotNull] T[] array, int targetIndex, int length)
       {
-        for (var index = 0; index < count; index++)
+        for (var index = 0; index < length; index++)
         {
-          array[startIndex + index] = ItemRefNoRangeCheck(index);
+          array[targetIndex + index] = ItemRefNoRangeCheck(index);
         }
       }
 
-      public virtual void CopyToImpl([NotNull] Builder<T> other, int startIndex, int count)
+      public virtual void CopyToImpl([NotNull] Builder<T> target, int targetIndex, int fromIndex, int length)
       {
         Assertion.Assert(!IsFrozen);
 
-        other.CountAndIterationData = CountAndIterationData;
+        target.CountAndIterationData = CountAndIterationData;
 
-        for (var index = 0; index < count; index++)
+        // note: reverse order is important to CopyTo into self
+        for (var index = length - 1; index >= 0; index--)
         {
-          other.ItemRefNoRangeCheck(startIndex + index) = ItemRefNoRangeCheck(index);
+          target.ItemRefNoRangeCheck(targetIndex + index) = ItemRefNoRangeCheck(fromIndex + index);
         }
       }
 
@@ -390,6 +390,7 @@ namespace JetBrains.Util.DataStructures.Collections
       }
     }
 
+    [DebuggerTypeProxy(typeof(BuilderDebugView<>))]
     internal sealed class ListOf1<T> : FixedBuilder<T>
     {
       internal T Item0;
@@ -472,6 +473,7 @@ namespace JetBrains.Util.DataStructures.Collections
       }
     }
 
+    [DebuggerTypeProxy(typeof(BuilderDebugView<>))]
     internal sealed class ListOf2<T> : FixedBuilder<T>
     {
       internal T Item0, Item1;
@@ -577,6 +579,7 @@ namespace JetBrains.Util.DataStructures.Collections
       }
     }
 
+    [DebuggerTypeProxy(typeof(BuilderDebugView<>))]
     internal sealed class ListOf3<T> : FixedBuilder<T>
     {
       internal T Item0, Item1, Item2;
@@ -698,6 +701,7 @@ namespace JetBrains.Util.DataStructures.Collections
       }
     }
 
+    [DebuggerTypeProxy(typeof(BuilderDebugView<>))]
     internal sealed class ListOf4<T> : FixedBuilder<T>
     {
       internal T Item0, Item1, Item2, Item3;
@@ -833,6 +837,7 @@ namespace JetBrains.Util.DataStructures.Collections
       }
     }
 
+    [DebuggerTypeProxy(typeof(BuilderDebugView<>))]
     internal sealed class ListOf8<T> : FixedBuilder<T>
     {
       // ReSharper disable MemberCanBePrivate.Global
@@ -939,7 +944,7 @@ namespace JetBrains.Util.DataStructures.Collections
           case 7:
           {
             var array = new T[count];
-            CopyToImpl(array, startIndex: 0, count);
+            CopyToImpl(array, targetIndex: 0, count);
             return new ListOfArray<T>(array, count) { CountAndIterationData = NotFrozenBit };
           }
 
@@ -986,6 +991,7 @@ namespace JetBrains.Util.DataStructures.Collections
       }
     }
 
+    [DebuggerTypeProxy(typeof(BuilderDebugView<>))]
     internal sealed class ListOfArray<T> : Builder<T>, IEnumerator<T>
     {
       [NotNull] private T[] myArray;
@@ -1114,36 +1120,36 @@ namespace JetBrains.Util.DataStructures.Collections
         CountAndIterationData = BeforeGetEnumerator;
       }
 
-      public override void CopyToImpl(T[] array, int startIndex, int count)
+      public override void CopyToImpl(T[] array, int targetIndex, int length)
       {
         Array.Copy(
           sourceArray: myArray,
           sourceIndex: 0,
           destinationArray: array,
-          destinationIndex: startIndex,
-          length: count);
+          destinationIndex: targetIndex,
+          length: length);
       }
 
-      public override void CopyToImpl(Builder<T> other, int startIndex, int count)
+      public override void CopyToImpl(Builder<T> target, int targetIndex, int fromIndex, int length)
       {
         Assertion.Assert(!IsFrozen);
 
-        other.CountAndIterationData = CountAndIterationData;
+        target.CountAndIterationData = CountAndIterationData;
 
-        if (other is ListOfArray<T> otherArray)
+        if (target is ListOfArray<T> otherArray)
         {
           Array.Copy(
             sourceArray: myArray,
-            sourceIndex: 0,
+            sourceIndex: fromIndex,
             destinationArray: otherArray.myArray,
-            destinationIndex: startIndex,
-            length: count);
+            destinationIndex: targetIndex,
+            length: length);
         }
         else
         {
-          for (var index = 0; index < count; index++)
+          for (var index = fromIndex; index < length; index++)
           {
-            other.ItemRefNoRangeCheck(startIndex + index) = myArray[index];
+            target.ItemRefNoRangeCheck(targetIndex + index) = myArray[index];
           }
         }
       }
@@ -1262,7 +1268,7 @@ namespace JetBrains.Util.DataStructures.Collections
       public BuilderDebugView([NotNull] Builder<T> builder)
       {
         var array = new T[builder.Count];
-        builder.CopyToImpl(array, startIndex: 0, builder.Capacity);
+        builder.CopyToImpl(array, targetIndex: 0, builder.Capacity);
         Items = array;
       }
 

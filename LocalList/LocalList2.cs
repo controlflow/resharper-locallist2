@@ -74,7 +74,7 @@ namespace JetBrains.Util
 
       myList = null;
       myCount = 0;
-      AddRange(enumerable);
+      InsertRange(index: 0, enumerable);
     }
 
     #endregion
@@ -267,7 +267,7 @@ namespace JetBrains.Util
 
     public void AddRange([NotNull] IEnumerable<T> items)
     {
-      InsertRange(index: 0, items);
+      InsertRange(index: myCount, items);
     }
 
     public void AddRange([NotNull] ICollection<T> collection)
@@ -296,7 +296,7 @@ namespace JetBrains.Util
       var otherList = list.myList;
       if (otherList != null)
       {
-        otherList.CopyToImpl(myList, startIndex: myCount, otherCount);
+        otherList.CopyToImpl(myList, targetIndex: myCount, fromIndex: 0, otherCount);
         myCount += otherCount;
       }
     }
@@ -350,29 +350,40 @@ namespace JetBrains.Util
 
       Assertion.Assert(myList != null);
 
+      // shift tail items if needed
+      myList.CopyToImpl(
+        target: myList,
+        targetIndex: index + collectionCount,
+        fromIndex: index,
+        length: myCount - index);
+
       if (myList.TryGetInternalArray() is { } internalArray)
       {
         // directly copy to internal array
-        collection.CopyTo(internalArray, arrayIndex: myCount);
-        myCount += collectionCount;
-      }
-      else if (collection is IList<T> list)
-      {
-        // avoid using IEnumerable<T> if possible, since it's likely
-        // IEnumerator allocation + many interface calls
-        for (var index1 = 0; index1 < collectionCount; index1++)
-        {
-          myList.ItemRefNoRangeCheck(index1) = list[index1];
-        }
-
+        collection.CopyTo(internalArray, arrayIndex: index);
         myCount += collectionCount;
       }
       else
       {
-        foreach (var item in collection)
+        if (collection is IList<T> list)
         {
-          myList.ItemRefNoRangeCheck(myCount++) = item;
+          // avoid using IEnumerable<T> if possible, since it's likely
+          // IEnumerator allocation + many interface calls
+          for (var collectionIndex = 0; collectionIndex < collectionCount; collectionIndex++)
+          {
+            myList.ItemRefNoRangeCheck(index + collectionIndex) = list[collectionIndex];
+          }
         }
+        else
+        {
+          var targetIndex = index;
+          foreach (var item in collection)
+          {
+            myList.ItemRefNoRangeCheck(targetIndex++) = item;
+          }
+        }
+
+        myCount += collectionCount;
       }
     }
 
@@ -517,7 +528,7 @@ namespace JetBrains.Util
 
         if (myList != null && newList != null)
         {
-          myList.CopyToImpl(newList, startIndex: 0, myCount);
+          myList.CopyToImpl(newList, targetIndex: 0, fromIndex: 0, length: myCount);
         }
 
         myList = newList;
@@ -542,7 +553,7 @@ namespace JetBrains.Util
       var newList = CreateBuilderWithCapacity(Normalize(newCapacity));
       Assertion.Assert(newList != null);
 
-      myList.CopyToImpl(newList, startIndex: 0, myCount);
+      myList.CopyToImpl(newList, targetIndex: 0, fromIndex: 0, myCount);
       myList = newList;
 
       static int Normalize(int cap) => cap <= 0 ? 0 : cap <= 4 ? 4 : cap <= 8 ? 8 : cap;
@@ -760,7 +771,7 @@ namespace JetBrains.Util
     }
 
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public bool AllFreeSlotsAreClear()
+    public readonly bool AllFreeSlotsAreClear()
     {
       if (myList == null) return true;
 
