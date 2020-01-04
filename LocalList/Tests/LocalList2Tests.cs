@@ -720,20 +720,13 @@ namespace JetBrains.Util.Tests
     }
 
     [Test]
-    public void Insert()
-    {
-
-    }
-
-// todo: insert
-    [Test]
     public void InsertRange()
     {
       var random = new Random();
 
       Func<IEnumerable<int>, IEnumerable<int>>[] transformations =
       {
-        //ts => ts,
+        ts => ts,
         ts => ts.ToList(),
         ts => ts.ToHashSet(),
       };
@@ -741,12 +734,17 @@ namespace JetBrains.Util.Tests
       foreach (var transformation in transformations)
       foreach (var list in CreateVariousFilledLocalLists())
       {
-        var insertIndex = random.Next(0, list.Count);
+        var insertIndex1 = random.Next(0, list.Count);
         var tail = Enumerable.Range(list.Count + 1, 3);
 
-        list.InsertRange(index: insertIndex, transformation(Enumerable.Repeat(0, 3)));
+        var middleItems = Enumerable.Repeat(element: 0, count: random.Next(0, 3));
+        list.InsertRange(index: insertIndex1, transformation(middleItems));
+
         list.InsertRange(index: 0, transformation(Enumerable.Range(0, 3).Select(x => x - 3)));
         list.InsertRange(index: list.Count, transformation(tail));
+
+        var insertIndex2 = random.Next(0, list.Count);
+        list.Insert(index: insertIndex2, item: 0);
 
         for (int index = 0, expected = -3; index < list.Count; index++)
         {

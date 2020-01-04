@@ -30,6 +30,7 @@ namespace JetBrains.Util
 
   public static class Assertion
   {
+    // todo: remove
     [Conditional("DEBUG")]
     [AssertionMethod]
     public static void Assert([AssertionCondition(AssertionConditionType.IS_TRUE)] bool condition)

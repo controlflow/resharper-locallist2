@@ -338,9 +338,10 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public sealed override void Reverse(int startIndex, int length)
       {
-        Debug.Assert(!IsFrozen);
-        Debug.Assert(startIndex >= 0);
-        Debug.Assert(length > 1);
+        Assertion.Assert(!IsFrozen);
+        Assertion.Assert(startIndex >= 0);
+
+        if (length < 1) return;
 
         var lastIndex = startIndex + length / 2;
         var endIndex = startIndex + length - 1;
@@ -1180,9 +1181,10 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void Reverse(int startIndex, int length)
       {
-        Debug.Assert(!IsFrozen);
-        Debug.Assert(startIndex >= 0);
-        Debug.Assert(length > 1);
+        Assertion.Assert(!IsFrozen, "!IsFrozen");
+        Assertion.Assert(startIndex >= 0, "startIndex >= 0");
+
+        if (length < 1) return;
 
         Array.Reverse(myArray, startIndex, length);
       }

@@ -2,19 +2,16 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using JetBrains.Annotations;
 using JetBrains.Util.DataStructures.Collections;
 // ReSharper disable MergeConditionalExpression
-
 // ReSharper disable once CheckNamespace
+
 namespace JetBrains.Util
 {
-  // todo: annotate methods readonly
-
   /// <summary>
   /// Represents collection of items that doesn't create heap objects unless items are added
   /// List is presented as array with capacity increasing as fibonacci numbers.
@@ -83,6 +80,7 @@ namespace JetBrains.Util
     /// <summary>
     /// Gets the number of elements contained in the <see cref="LocalList2{T}"/>.
     /// </summary>
+    // ReSharper disable once ConvertToAutoPropertyWithPrivateSetter
     public readonly int Count => myCount;
 
     public readonly T this[int index]
@@ -149,6 +147,30 @@ namespace JetBrains.Util
       myList.ModifyVersion();
       myList.RemoveAt(index, myCount);
       myCount--;
+    }
+
+    public void Insert(int index, T item)
+    {
+      if ((uint) index >= (uint) myCount) ThrowOutOfRange();
+
+      if (myList != null)
+      {
+        if (myList.IsFrozen) ThrowResultObtained();
+
+        myList.ModifyVersion(); // modify before EnsureCapacity()
+      }
+
+      EnsureCapacity(capacity: myCount + 1);
+
+      Assertion.Assert(myList != null);
+
+      // shift tail items if needed
+      myList.CopyToImpl(
+        target: myList, targetIndex: index + 1,
+        fromIndex: index, length: myCount - index);
+
+      myList.ItemRefNoRangeCheck(index) = item;
+      myCount++;
     }
 
     public void Clear()
@@ -313,7 +335,7 @@ namespace JetBrains.Util
       var otherCount = list.myCount;
       if (otherCount == 0) return; // do nothing
 
-      EnsureCapacity(myCount + otherCount); // checks for frozen
+      EnsureCapacity(myCount + otherCount);
 
       Assertion.Assert(myList != null);
 
@@ -349,7 +371,7 @@ namespace JetBrains.Util
       }
 
       // if index is != 0, just append items to the tail first
-      var shift = myCount - index;
+      var newItemsStartIndex = myCount;
 
       foreach (var item in items)
       {
@@ -359,13 +381,15 @@ namespace JetBrains.Util
         myList.Append(in item, myCount++, ref myList);
       }
 
-      // and later rotate them
-      if (shift > 0)
+      if (index < newItemsStartIndex) // and later rotate them
       {
-        // rotation through
-      }
+        Assertion.Assert(myList != null);
 
-      // todo: rotation
+        // cool trick to rotate in-place in O(2n)
+        myList.Reverse(index, length: newItemsStartIndex - index);
+        myList.Reverse(newItemsStartIndex, length: myCount - newItemsStartIndex);
+        myList.Reverse(index, length: myCount - index);
+      }
     }
 
     public void InsertRange(int index, [NotNull] ICollection<T> collection)
@@ -389,39 +413,34 @@ namespace JetBrains.Util
 
       // shift tail items if needed
       myList.CopyToImpl(
-        target: myList,
-        targetIndex: index + collectionCount,
-        fromIndex: index,
-        length: myCount - index);
+        target: myList, targetIndex: index + collectionCount,
+        fromIndex: index, length: myCount - index);
 
       if (myList.TryGetInternalArray() is { } internalArray)
       {
         // directly copy to internal array
         collection.CopyTo(internalArray, arrayIndex: index);
-        myCount += collectionCount;
+      }
+      else if (collection is IList<T> list)
+      {
+        // avoid using IEnumerable<T> if possible, since it's likely
+        // IEnumerator allocation + many interface calls
+        for (var listIndex = 0; listIndex < collectionCount; listIndex++)
+        {
+          myList.ItemRefNoRangeCheck(index + listIndex) = list[listIndex];
+        }
       }
       else
       {
-        if (collection is IList<T> list)
-        {
-          // avoid using IEnumerable<T> if possible, since it's likely
-          // IEnumerator allocation + many interface calls
-          for (var collectionIndex = 0; collectionIndex < collectionCount; collectionIndex++)
-          {
-            myList.ItemRefNoRangeCheck(index + collectionIndex) = list[collectionIndex];
-          }
-        }
-        else
-        {
-          var targetIndex = index;
-          foreach (var item in collection)
-          {
-            myList.ItemRefNoRangeCheck(targetIndex++) = item;
-          }
-        }
+        var targetIndex = index;
 
-        myCount += collectionCount;
+        foreach (var item in collection)
+        {
+          myList.ItemRefNoRangeCheck(targetIndex++) = item;
+        }
       }
+
+      myCount += collectionCount;
     }
 
     #endregion
