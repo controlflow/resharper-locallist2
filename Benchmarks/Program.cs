@@ -1,69 +1,111 @@
-﻿using System;
-
+﻿using System.Collections;
+using System.Collections.Generic;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 using JetBrains.Util;
 
-public struct StringBox {
-  public string Value;
-}
+[RankColumn, IterationCount(10000), MemoryDiagnoser]
+public class LocalListBenchmarks
+{
+  private List<int> myList;
+  private LocalList<int> myLocalList;
+  private LocalList2<int> myLocalList2;
 
-[RankColumn]
-public class ArraysBenchmark {
-  private int[] intArray;
-  private string[] stringArray;
-  private StringBox[] stringBoxArray;
-  //private Memory<string> stringMemory;
-
-  [Params(1000, 10000)]
+  //[Params(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 25)]
+  [Params(2, 4, 6, 8, 10, 25)]
   public int Count;
 
   [GlobalSetup]
-  public void Setup() {
-    intArray = new int[Count];
-    stringArray = new string[Count];
-    stringBoxArray = new StringBox[Count];
-    //stringMemory = new Memory<string>();
+  public void Setup()
+  {
+    myList = new List<int>(capacity: Count);
+    myLocalList = new LocalList<int>(capacity: Count);
+    myLocalList2 = new LocalList2<int>(capacity: Count);
   }
 
-  [Benchmark]
-  public void IntArray() {
-    var array = intArray;
-    for (var index = 0; index < array.Length; index++) {
-      array[index] = 42;
+  [IterationSetup]
+  public void Clear()
+  {
+    myList.Clear();
+    myLocalList.Clear();
+    myLocalList2.Clear();
+  }
+
+  //[Benchmark]
+  public void List()
+  {
+    var list = myList;
+
+    for (var index = 0; index < Count; index++)
+    {
+      list.Add(index);
+    }
+
+    // for (var index = 0; index < Count; index++)
+    // {
+    //    var t = list[index];
+    //    list[index] = t;
+    // }
+
+    foreach (var _ in list)
+    {
+
+    }
+
+    foreach (var _ in (IList<int>) list)
+    {
+
+    }
+  }
+
+  //[Benchmark]
+  public void LocalList()
+  {
+    var list = myLocalList;
+
+    for (var index = 0; index < Count; index++)
+    {
+      list.Add(index);
+    }
+
+    // for (var index = 0; index < Count; index++)
+    // {
+    //   var t = list[index];
+    //   list[index] = t;
+    // }
+
+    foreach (var _ in list)
+    {
+
     }
   }
 
   [Benchmark]
-  public void StringArray() {
-    var array = stringArray;
-    for (var index = 0; index < array.Length; index++) {
-      array[index] = "42";
-    }
-  }
+  public void LocalList2()
+  {
+    var list = myLocalList2;
 
-  [Benchmark]
-  public void StringBoxArray() {
-    var array = stringBoxArray;
-    for (var index = 0; index < array.Length; index++) {
-      array[index].Value = "42";
+    for (var index = 0; index < Count; index++)
+    {
+      list.Add(index);
     }
-  }
 
-  [Benchmark]
-  public void StringSpan() {
-    Span<string> span = stringArray;
-    for (var index = 0; index < span.Length; index++) {
-      span[index] = "42";
+    // for (var index = 0; index < Count; index++)
+    // {
+    //   var t = list[index];
+    //   list[index] = t;
+    // }
+
+    foreach (var _ in list)
+    {
+
     }
   }
 }
 
 public class Program {
   public static void Main(string[] args) {
-    BenchmarkRunner.Run<ArraysBenchmark>();
-    LocalList2<int> xs = new LocalList2<int>();
-    xs.Add(1);
+    BenchmarkRunner.Run<LocalListBenchmarks>();
   }
 }
 

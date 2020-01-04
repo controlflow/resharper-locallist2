@@ -8,7 +8,7 @@ using System.Text;
 using JetBrains.Annotations;
 using JetBrains.Util.DataStructures.Collections;
 // ReSharper disable MergeConditionalExpression
-// ReSharper disable once CheckNamespace
+// ReSharper disable CheckNamespace
 
 namespace JetBrains.Util
 {
