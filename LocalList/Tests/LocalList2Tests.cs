@@ -554,12 +554,17 @@ namespace JetBrains.Util.Tests
 
         Assert.LessOrEqual(list.Capacity, oldCapacity);
         Assert.AreEqual(list.Count, list.Capacity);
-        Assert.DoesNotThrow(() => enumeratorBefore.MoveNext()); // todo: why do not throws?
+        Assert.DoesNotThrow(() => enumeratorBefore.MoveNext());
 
         var enumeratorBefore2 = list.GetEnumerator();
 
         list.EnsureCapacity(oldCapacity);
         VerifyListData();
+
+        if (oldCapacity == countBefore)
+          Assert.AreEqual(oldCapacity, list.Capacity);
+        else // EnsureCapacity() should never produce lists of capacity 1,2,3,5,6,7
+          Assert.That(list.Capacity, Is.Not.InRange(1, 3).And.Not.InRange(5, 7));
 
         Assert.LessOrEqual(oldCapacity, list.Capacity); // resizes up to max(2x, new capacity)
         Assert.DoesNotThrow(() => enumeratorBefore2.MoveNext());
@@ -667,13 +672,63 @@ namespace JetBrains.Util.Tests
     [Test]
     public void AddRange()
     {
-      //var list = new LocalList2<string>();
-      //list.AddRange();
+      foreach (var capacity in CapacitiesToTest.Concat(new []{ 70000 }))
+      {
+        Console.WriteLine(capacity);
+
+        var listFromEnumerable = new LocalList2<int>(enumerable: Enumerable.Range(1, capacity));
+        VerifyDataAndCapacity(listFromEnumerable);
+
+        // pure IEnumerable<T>
+        var listAddRange = new LocalList2<int>(capacity: 4, forceUseArray: true);
+        var enumerator = listAddRange.GetEnumerator();
+        listAddRange.AddRange(items: Enumerable.Range(1, capacity));
+        VerifyDataAndCapacity(listAddRange);
+        Assert.Throws<InvalidOperationException>(() => enumerator.MoveNext());
+
+        // other LocalList
+        var enumerator2 = listAddRange.GetEnumerator();
+        listAddRange.AddRange(list: listFromEnumerable);
+        VerifyDataAndCapacity(listAddRange, shift: capacity);
+        Assert.Throws<InvalidOperationException>(() => enumerator2.MoveNext());
+
+        var enumerator3 = listAddRange.GetEnumerator();
+        listAddRange.AddRange(collection: Enumerable.Range(1, capacity).ToHashSet());
+        VerifyDataAndCapacity(listAddRange, shift: capacity * 2);
+        Assert.Throws<InvalidOperationException>(() => enumerator3.MoveNext());
+
+        // IList<T> implementation
+        var listAddList = new LocalList2<int>();
+        listAddList.AddRange(collection: Enumerable.Range(1, capacity).ToList());
+        Assert.That(listAddList.Capacity, Is.AnyOf(0, 4, 8, capacity));
+        VerifyDataAndCapacity(listAddList);
+
+        // ICollection<T> (sorted)
+        var listAddSet = new LocalList2<int>();
+        listAddSet.AddRange(collection: Enumerable.Range(1, capacity).ToHashSet());
+        Assert.That(listAddSet.Capacity, Is.AnyOf(0, 4, 8, capacity));
+        VerifyDataAndCapacity(listAddSet);
+
+        void VerifyDataAndCapacity(in LocalList2<int> list, int shift = 0)
+        {
+          Assert.AreEqual(capacity + shift, list.Count);
+
+          for (var index = 0; index < list.Count - shift; index++)
+          {
+            Assert.AreEqual(index + 1, list[shift + index]);
+          }
+        }
+      }
+    }
+
+    [Test]
+    public void Insert()
+    {
+
     }
 
     // todo: Insert()
     // todo: InsertRange()
-    // todo: AddRange()
     // todo: ToString()
 
     #region Test helpers

@@ -21,9 +21,6 @@ namespace JetBrains.Util
           return nonGenericCollection.Count;
         case IReadOnlyCollection<T> readOnlyCollection:
           return readOnlyCollection.Count;
-        case string stringValue:
-          return stringValue.Length;
-
         default:
           return -1;
       }

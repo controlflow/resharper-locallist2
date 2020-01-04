@@ -101,7 +101,7 @@ namespace JetBrains.Util.DataStructures.Collections
       [Pure]
       public abstract ref T ItemRefNoRangeCheck(int index);
 
-      public abstract void Append(in T newItem, int count, ref Builder<T> self);
+      public abstract void Append(in T newItem, int count, [NotNull] ref Builder<T> self);
 
       [NotNull, Pure]
       public abstract Builder<T> Clone(int count);
@@ -109,15 +109,15 @@ namespace JetBrains.Util.DataStructures.Collections
       [CanBeNull]
       public abstract Builder<T> TrimExcess(int count, bool clone);
 
-      public virtual void CopyToImpl([NotNull] T[] array, int arrayIndex, int count)
+      public virtual void CopyToImpl([NotNull] T[] array, int startIndex, int count)
       {
         for (var index = 0; index < count; index++)
         {
-          array[arrayIndex + index] = ItemRefNoRangeCheck(index);
+          array[startIndex + index] = ItemRefNoRangeCheck(index);
         }
       }
 
-      public virtual void CopyToImpl([NotNull] Builder<T> other, int count)
+      public virtual void CopyToImpl([NotNull] Builder<T> other, int startIndex, int count)
       {
         Debug.Assert(!IsFrozen);
 
@@ -125,9 +125,12 @@ namespace JetBrains.Util.DataStructures.Collections
 
         for (var index = 0; index < count; index++)
         {
-          other.ItemRefNoRangeCheck(index) = ItemRefNoRangeCheck(index);
+          other.ItemRefNoRangeCheck(startIndex + index) = ItemRefNoRangeCheck(index);
         }
       }
+
+      [ItemCanBeNull, Pure]
+      public virtual T[] TryGetInternalArray() => null;
 
       #region Read access
 
@@ -215,7 +218,6 @@ namespace JetBrains.Util.DataStructures.Collections
     {
       protected FixedBuilder()
       {
-        // todo: do we need it?
         // not frozen, count = 0, version = 0xFFFF
         CountAndIterationData = NotFrozenBit | IteratorOrVersionMask;
       }
@@ -252,7 +254,6 @@ namespace JetBrains.Util.DataStructures.Collections
 
       #region Frozen enumeration
 
-      // todo: is this suitable for array-based impl? seems not, count can be too large
       public override IEnumerator<T> GetEnumerator()
       {
         Debug.Assert(IsFrozen);
@@ -263,7 +264,9 @@ namespace JetBrains.Util.DataStructures.Collections
         var beforeFirstElement = data | BeforeFirstElement;
 
         if (beforeGetEnumerator == Interlocked.CompareExchange(
-              location1: ref CountAndIterationData, value: beforeFirstElement, comparand: beforeGetEnumerator))
+              location1: ref CountAndIterationData,
+              value: beforeFirstElement,
+              comparand: beforeGetEnumerator))
         {
           return this;
         }
@@ -485,7 +488,7 @@ namespace JetBrains.Util.DataStructures.Collections
         }
       }
 
-      [Pure]
+      [Pure, NotNull]
       private Builder<T> Enlarge(in T newItem)
       {
         return new ListOf4<T>
@@ -597,7 +600,7 @@ namespace JetBrains.Util.DataStructures.Collections
         }
       }
 
-      [Pure]
+      [Pure, NotNull]
       private Builder<T> Enlarge(in T newItem)
       {
         return new ListOf8<T>
@@ -726,7 +729,7 @@ namespace JetBrains.Util.DataStructures.Collections
         }
       }
 
-      [Pure]
+      [Pure, NotNull]
       private Builder<T> Enlarge(in T newItem)
       {
         return new ListOf8<T>
@@ -910,7 +913,7 @@ namespace JetBrains.Util.DataStructures.Collections
           case 7:
           {
             var array = new T[count];
-            CopyToImpl(array, arrayIndex: 0, count);
+            CopyToImpl(array, startIndex: 0, count);
             return new ListOfArray<T>(array, count) { CountAndIterationData = NotFrozenBit };
           }
 
@@ -1076,17 +1079,17 @@ namespace JetBrains.Util.DataStructures.Collections
         CountAndIterationData = BeforeGetEnumerator;
       }
 
-      public override void CopyToImpl(T[] array, int arrayIndex, int count)
+      public override void CopyToImpl(T[] array, int startIndex, int count)
       {
         Array.Copy(
           sourceArray: myArray,
           sourceIndex: 0,
           destinationArray: array,
-          destinationIndex: arrayIndex,
+          destinationIndex: startIndex,
           length: count);
       }
 
-      public override void CopyToImpl(Builder<T> other, int count)
+      public override void CopyToImpl(Builder<T> other, int startIndex, int count)
       {
         Debug.Assert(!IsFrozen);
 
@@ -1094,16 +1097,23 @@ namespace JetBrains.Util.DataStructures.Collections
 
         if (other is ListOfArray<T> otherArray)
         {
-          Array.Copy(myArray, otherArray.myArray, count);
+          Array.Copy(
+            sourceArray: myArray,
+            sourceIndex: 0,
+            destinationArray: otherArray.myArray,
+            destinationIndex: startIndex,
+            length: count);
         }
         else
         {
           for (var index = 0; index < count; index++)
           {
-            other.ItemRefNoRangeCheck(index) = myArray[index];
+            other.ItemRefNoRangeCheck(startIndex + index) = myArray[index];
           }
         }
       }
+
+      public override T[] TryGetInternalArray() => myArray;
 
       public override T this[int index]
       {
@@ -1217,7 +1227,7 @@ namespace JetBrains.Util.DataStructures.Collections
       public BuilderDebugView([NotNull] Builder<T> builder)
       {
         var array = new T[builder.Count];
-        builder.CopyToImpl(array, arrayIndex: 0, builder.Capacity);
+        builder.CopyToImpl(array, startIndex: 0, builder.Capacity);
         Items = array;
       }
 
