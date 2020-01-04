@@ -119,7 +119,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public virtual void CopyToImpl([NotNull] Builder<T> other, int startIndex, int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         other.CountAndIterationData = CountAndIterationData;
 
@@ -138,7 +138,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public int IndexOf(T item)
       {
-        Debug.Assert(IsFrozen);
+        Assertion.Assert(IsFrozen);
 
         return IndexOf(item, Count);
       }
@@ -206,10 +206,12 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public void ModifyVersion()
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         CountAndIterationData = (CountAndIterationData + 1) | NotFrozenBit;
       }
+
+      public abstract void Sort(int startIndex, int length, [NotNull] IComparer<T> comparer);
 
       public abstract void Freeze(int count);
     }
@@ -224,8 +226,8 @@ namespace JetBrains.Util.DataStructures.Collections
 
       protected FixedBuilder(int count)
       {
-        Debug.Assert(count > 0); // use 'EmptyList<T>.Instance' instead
-        Debug.Assert(count <= MaxCount);
+        Assertion.Assert(count > 0); // use 'EmptyList<T>.Instance' instead
+        Assertion.Assert(count <= MaxCount);
 
         // frozen, count is set, before GetEnumerator
         CountAndIterationData = (int) ((uint) count << CountShift) | BeforeGetEnumerator;
@@ -235,7 +237,7 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         get
         {
-          Debug.Assert(IsFrozen);
+          Assertion.Assert(IsFrozen);
 
           return (int) ((uint) CountAndIterationData << 1 >> CountShift + 1);
         }
@@ -256,8 +258,8 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override IEnumerator<T> GetEnumerator()
       {
-        Debug.Assert(IsFrozen);
-        Debug.Assert(ShortCount > 0);
+        Assertion.Assert(IsFrozen);
+        Assertion.Assert(ShortCount > 0);
 
         var data = CountAndIterationData & ~IteratorOrVersionMask;
         var beforeGetEnumerator = data | BeforeGetEnumerator;
@@ -276,7 +278,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       bool IEnumerator.MoveNext()
       {
-        Debug.Assert(IsFrozen);
+        Assertion.Assert(IsFrozen);
 
         var newIterator = (CountAndIterationData + 1) & IteratorOrVersionMask;
         if (newIterator == (CountAndIterationData >> CountShift)) return false;
@@ -305,7 +307,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
         public Enumerator([NotNull] FixedBuilder<T> builder)
         {
-          Debug.Assert(builder.IsFrozen);
+          Assertion.Assert(builder.IsFrozen);
 
           myBuilder = builder;
           myCount = (short) builder.ShortCount;
@@ -329,6 +331,30 @@ namespace JetBrains.Util.DataStructures.Collections
       object IEnumerator.Current => Current;
 
       #endregion
+
+      public override void Sort(int startIndex, int length, IComparer<T> comparer)
+      {
+        Assertion.Assert(length > 1);
+        Assertion.Assert(startIndex >= 0);
+        Assertion.Assert(startIndex + length <= Capacity);
+
+        // insertion sort for small lists
+        for (int index = startIndex, endIndex = startIndex + length - 1; index < endIndex; index++)
+        {
+          var indexBefore = index;
+          var item = ItemRefNoRangeCheck(index + 1);
+
+          while (indexBefore >= startIndex
+                 && ItemRefNoRangeCheck(indexBefore) is var otherItem
+                 && comparer.Compare(item, otherItem) < 0)
+          {
+            ItemRefNoRangeCheck(indexBefore + 1) = otherItem;
+            indexBefore--;
+          }
+
+          ItemRefNoRangeCheck(indexBefore + 1) = item;
+        }
+      }
 
       public sealed override string ToString()
       {
@@ -392,7 +418,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void Append(in T newItem, int count, ref Builder<T> self)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         if (count == 0)
         {
@@ -411,7 +437,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> Clone(int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         return new ListOf1<T>
         {
@@ -422,7 +448,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> TrimExcess(int count, bool clone)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         if (count == 0) return null;
 
@@ -433,14 +459,14 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void Clear(int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         Item0 = default;
       }
 
       public override void RemoveAt(int indexToRemove, int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         Item0 = default;
       }
@@ -478,7 +504,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void Append(in T newItem, int count, ref Builder<T> self)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         switch (count)
         {
@@ -502,7 +528,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> Clone(int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         return new ListOf2<T>
         {
@@ -514,7 +540,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> TrimExcess(int count, bool clone)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         switch (count)
         {
@@ -535,7 +561,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void Clear(int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         Item0 = default;
         Item1 = default;
@@ -543,7 +569,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void RemoveAt(int indexToRemove, int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         if (indexToRemove < 1) Item0 = Item1;
 
@@ -589,7 +615,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void Append(in T newItem, int count, ref Builder<T> self)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         switch (count)
         {
@@ -615,7 +641,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> Clone(int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         return new ListOf3<T>
         {
@@ -628,7 +654,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> TrimExcess(int count, bool clone)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         switch (count)
         {
@@ -654,7 +680,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void Clear(int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         Item0 = default;
         Item1 = default;
@@ -663,7 +689,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void RemoveAt(int indexToRemove, int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         if (indexToRemove < 1) Item0 = Item1;
         if (indexToRemove < 2) Item1 = Item2;
@@ -717,7 +743,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void Append(in T newItem, int count, ref Builder<T> self)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         switch (count)
         {
@@ -745,7 +771,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> Clone(int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         return new ListOf4<T>
         {
@@ -759,7 +785,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> TrimExcess(int count, bool clone)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         switch (count)
         {
@@ -787,7 +813,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void Clear(int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         Item0 = default;
         Item1 = default;
@@ -797,7 +823,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void RemoveAt(int indexToRemove, int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         if (indexToRemove < 1) Item0 = Item1;
         if (indexToRemove < 2) Item1 = Item2;
@@ -843,7 +869,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void Append(in T newItem, int count, ref Builder<T> self)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         switch (count)
         {
@@ -880,7 +906,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> Clone(int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         return new ListOf8<T>
         {
@@ -898,7 +924,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> TrimExcess(int count, bool clone)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         switch (count)
         {
@@ -932,7 +958,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void Clear(int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         Item0 = default;
         Item1 = default;
@@ -946,7 +972,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void RemoveAt(int indexToRemove, int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         if (indexToRemove < 1) Item0 = Item1;
         if (indexToRemove < 2) Item1 = Item2;
@@ -978,8 +1004,8 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public ListOfArray([NotNull] T[] array, int count)
       {
-        Debug.Assert(array != null);
-        Debug.Assert(array.Length > 0);
+        Assertion.Assert(array != null);
+        Assertion.Assert(array.Length > 0);
 
         CountAndIterationData = BeforeGetEnumerator; // frozen
         myArray = array;
@@ -994,7 +1020,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void Append(in T newItem, int count, ref Builder<T> self)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         if (count == myArray.Length)
         {
@@ -1008,7 +1034,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> Clone(int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         var newArray = new T[myArray.Length];
         Array.Copy(myArray, newArray, count);
@@ -1020,7 +1046,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override Builder<T> TrimExcess(int count, bool clone)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         if (clone && count == myArray.Length)
         {
@@ -1054,7 +1080,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void RemoveAt(int indexToRemove, int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         Array.Copy(
           sourceArray: myArray,
@@ -1068,9 +1094,18 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void Clear(int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         Array.Clear(myArray, index: 0, length: count);
+      }
+
+      public override void Sort(int startIndex, int length, IComparer<T> comparer)
+      {
+        Assertion.Assert(length > 1);
+        Assertion.Assert(startIndex >= 0);
+        Assertion.Assert(startIndex + length <= myArray.Length);
+
+        Array.Sort(myArray, startIndex, length, comparer);
       }
 
       public override void Freeze(int count)
@@ -1091,7 +1126,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override void CopyToImpl(Builder<T> other, int startIndex, int count)
       {
-        Debug.Assert(!IsFrozen);
+        Assertion.Assert(!IsFrozen);
 
         other.CountAndIterationData = CountAndIterationData;
 
@@ -1119,7 +1154,7 @@ namespace JetBrains.Util.DataStructures.Collections
       {
         get
         {
-          Debug.Assert(IsFrozen);
+          Assertion.Assert(IsFrozen);
 
           if ((uint) index >= (uint) myCount) ThrowOutOfRange();
 
@@ -1132,8 +1167,8 @@ namespace JetBrains.Util.DataStructures.Collections
 
       public override IEnumerator<T> GetEnumerator()
       {
-        Debug.Assert(IsFrozen);
-        Debug.Assert(myCount > 0);
+        Assertion.Assert(IsFrozen);
+        Assertion.Assert(myCount > 0);
 
         if (BeforeGetEnumerator == Interlocked.CompareExchange(
               location1: ref CountAndIterationData, value: BeforeFirstElement, comparand: BeforeGetEnumerator))
@@ -1171,7 +1206,7 @@ namespace JetBrains.Util.DataStructures.Collections
 
         public Enumerator(ListOfArray<T> builder)
         {
-          Debug.Assert(builder.IsFrozen);
+          Assertion.Assert(builder.IsFrozen);
 
           myArray = builder.myArray;
           myCount = builder.myCount;

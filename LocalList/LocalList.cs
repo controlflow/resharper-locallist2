@@ -422,7 +422,7 @@ namespace JetBrains.Util
 
       if (myArray == null)
       {
-        Debug.Assert(atIndex == 0, "atIndex == 0");
+        Assertion.Assert(atIndex == 0, "atIndex == 0");
         var newSize = CalculateNewAndNextSize(0, myCount + length);
         var newArray = new T[newSize];
         myArray = newArray;

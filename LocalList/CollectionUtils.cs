@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using JetBrains.Annotations;
 
 namespace JetBrains.Util
@@ -24,6 +25,23 @@ namespace JetBrains.Util
         default:
           return -1;
       }
+    }
+  }
+
+  public static class Assertion
+  {
+    [Conditional("DEBUG")]
+    public static void Assert(bool condition)
+    {
+      if (!condition)
+        throw new Exception("Assertion failed");
+    }
+
+    [Conditional("DEBUG")]
+    public static void Assert(bool condition, [NotNull] string message)
+    {
+      if (!condition)
+        throw new Exception($"Assertion failed: {message}");
     }
   }
 }

@@ -674,8 +674,6 @@ namespace JetBrains.Util.Tests
     {
       foreach (var capacity in CapacitiesToTest.Concat(new []{ 70000 }))
       {
-        Console.WriteLine(capacity);
-
         var listFromEnumerable = new LocalList2<int>(enumerable: Enumerable.Range(1, capacity));
         VerifyDataAndCapacity(listFromEnumerable);
 
@@ -727,8 +725,123 @@ namespace JetBrains.Util.Tests
 
     }
 
-    // todo: Insert()
-    // todo: InsertRange()
+    [Test]
+    public void InsertRange()
+    {
+
+    }
+
+    [Test]
+    public void Sort()
+    {
+      var random = new Random();
+
+      foreach (var list in CreateVariousFilledLocalLists())
+      {
+        var count = list.Count;
+        list.Clear();
+
+        for (var index = 0; index < count; index++)
+          list.Add(random.Next());
+
+        var enumerator = list.GetEnumerator();
+
+        list.UnstableSort();
+
+        if (count > 0) Assert.Throws<InvalidOperationException>(() => enumerator.MoveNext());
+
+        AssertItemsInOrder(Assert.LessOrEqual);
+
+        list.UnstableSort(comparison: (x, y) => y.CompareTo(x));
+
+        AssertItemsInOrder(Assert.GreaterOrEqual);
+
+        list.UnstableSort(); // bring back the order
+
+        var comparer = new ReversedIntComparer();
+        list.UnstableSort(index: 0, length: count, comparer);
+        Assert.AreEqual(count > 1, comparer.ComparisonCount > 0);
+
+        AssertItemsInOrder(Assert.GreaterOrEqual);
+
+        var resultingList = list.ResultingList();
+
+        CollectionAssert.AreEqual(resultingList.OrderByDescending(x => x), resultingList);
+
+        Assert.Throws<InvalidOperationException>(() => list.UnstableSort());
+        Assert.Throws<InvalidOperationException>(() => list.UnstableSort((x, y) => 0));
+        Assert.Throws<InvalidOperationException>(() => list.UnstableSort(0, count, Comparer<int>.Default));
+
+        void AssertItemsInOrder(Action<int, int> assertion)
+        {
+          for (var index = 1; index < count; index++)
+          {
+            var prev = list[index - 1];
+            var next = list[index];
+
+            assertion(prev, next);
+          }
+        }
+      }
+
+      {
+        var bigList = new LocalList2<int>();
+
+        for (var index = 0; index < 100; index++)
+          bigList.Add(random.Next(0, 100) - 1000);
+        for (var index = 0; index < 10; index++)
+          bigList.Add(index);
+        for (var index = 0; index < 100; index++)
+          bigList.Add(random.Next(0, 100) + 1000);
+
+        // ReSharper disable once AssignNullToNotNullAttribute
+        Assert.Throws<ArgumentNullException>(
+          () => bigList.UnstableSort(comparison: null));
+
+        // ReSharper disable once AssignNullToNotNullAttribute
+        Assert.Throws<ArgumentNullException>(
+          () => bigList.UnstableSort(comparer: null));
+        // ReSharper disable once AssignNullToNotNullAttribute
+        Assert.Throws<ArgumentNullException>(
+          () => bigList.UnstableSort(0, bigList.Count, comparer: null));
+
+        bigList.UnstableSort(index: 0, length: 100, Comparer<int>.Default);
+        bigList.UnstableSort(index: 105, length: 100, Comparer<int>.Default);
+
+        var resultingList = bigList.ResultingList();
+        CollectionAssert.AreEqual(resultingList.OrderBy(x => x), resultingList);
+      }
+
+      {
+        var smallList = new LocalList2<int>(capacity: 8);
+        smallList.Add(1);
+        smallList.Add(3); //
+        smallList.Add(2); //
+        smallList.Add(4);
+        smallList.Add(6); //
+        smallList.Add(7); //
+        smallList.Add(5); //
+        smallList.Add(8);
+
+        smallList.UnstableSort(index: 2, length: 2, Comparer<int>.Default);
+        smallList.UnstableSort(index: 4, length: 3, Comparer<int>.Default);
+
+        var resultingList = smallList.ResultingList();
+        CollectionAssert.AreEqual(resultingList.OrderBy(x => x), resultingList);
+      }
+    }
+
+    private sealed class ReversedIntComparer : IComparer<int>
+    {
+      public int Compare(int x, int y)
+      {
+        ComparisonCount++;
+        return y.CompareTo(x);
+      }
+
+      public int ComparisonCount;
+    }
+
     // todo: ToString()
 
     #region Test helpers

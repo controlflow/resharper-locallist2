@@ -65,7 +65,7 @@ namespace JetBrains.Util
       if (capacity < 0)
         throw new ArgumentOutOfRangeException(nameof(capacity));
 
-      Debug.Assert(capacity >= 0, "capacity >= 0");
+      Assertion.Assert(capacity >= 0, "capacity >= 0");
 
       myCount = 0;
 
@@ -308,7 +308,7 @@ namespace JetBrains.Util
 
       EnsureCapacity(myCount + collectionCount);
 
-      Debug.Assert(myList != null);
+      Assertion.Assert(myList != null);
 
       if (myList.TryGetInternalArray() is { } internalArray)
       {
@@ -350,7 +350,7 @@ namespace JetBrains.Util
 
       EnsureCapacity(myCount + otherCount); // checks for frozen
 
-      Debug.Assert(myList != null);
+      Assertion.Assert(myList != null);
 
       myList.ModifyVersion();
 
@@ -526,7 +526,7 @@ namespace JetBrains.Util
       var newCapacity = Math.Max(currentCapacity * 2, capacity);
 
       var newList = CreateBuilderWithCapacity(Normalize(newCapacity));
-      Debug.Assert(newList != null);
+      Assertion.Assert(newList != null);
 
       myList.CopyToImpl(newList, startIndex: 0, myCount);
       myList = newList;
@@ -594,7 +594,7 @@ namespace JetBrains.Util
 
       if (myArray == null)
       {
-        Debug.Assert(atIndex == 0, "atIndex == 0");
+        Assertion.Assert(atIndex == 0, "atIndex == 0");
         var newSize = 42;
         var newArray = new T[newSize];
         myArray = newArray;
@@ -650,36 +650,63 @@ namespace JetBrains.Util
     }
 
 
+    #region Sorting
+
+    public void UnstableSort()
+    {
+      UnstableSort(0, myCount, Comparer<T>.Default);
+    }
+
+    public void UnstableSort([NotNull] Comparison<T> comparison)
+    {
+      if (comparison == null)
+        throw new ArgumentNullException(nameof(comparison));
+
+      UnstableSort(0, myCount, new DelegateComparer(comparison));
+    }
+
+    private sealed class DelegateComparer : IComparer<T>
+    {
+      [NotNull] private readonly Comparison<T> myComparison;
+
+      public DelegateComparer([NotNull] Comparison<T> comparison)
+      {
+        myComparison = comparison;
+      }
+
+      public int Compare(T x, T y) => myComparison(x, y);
+    }
 
     public void UnstableSort([NotNull] IComparer<T> comparer)
     {
-
-
-      if (myVersion == -1) ThrowResultObtained();
-
-      if (myArray != null && myArray.Length > 1)
-      {
-        Array.Sort(myArray, 0, myCount, comparer);
-        myVersion++;
-      }
+      UnstableSort(0, myCount, comparer);
     }
 
     public void UnstableSort(int index, int length, [NotNull] IComparer<T> comparer)
     {
-      if (myVersion == -1) ThrowResultObtained();
-      if (index < 0) ThrowOutOfRange();
-
+      if (index < 0)
+        ThrowOutOfRange();
+      if (comparer == null)
+        throw new ArgumentNullException(nameof(comparer));
       if (length < 0)
-        throw new ArgumentOutOfRangeException(nameof(length), "Length should be non-negative");
-      if (index + length < myCount)
-        throw new ArgumentOutOfRangeException(nameof(length), "Index + Length should be less than Count");
+        throw new ArgumentOutOfRangeException(nameof(length));
+      if (index + length > myCount)
+        throw new ArgumentException(
+          $"The number of items in {nameof(LocalList2<int>)} is greater than the available array space");
 
-      if (myArray != null && myArray.Length > 1)
+      if (myList == null) return;
+
+      if (myList.IsFrozen) ThrowResultObtained();
+
+      myList.ModifyVersion();
+
+      if (myCount > 1)
       {
-        Array.Sort(myArray, index, length, comparer);
-        myVersion++;
+        myList.Sort(0, myCount, comparer);
       }
     }
+
+    #endregion
 
     public override readonly string ToString()
     {
